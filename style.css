@@ -57,85 +57,101 @@ body, html {
 @keyframes spinOrbit { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 /* --- 1. Knowledge Search Section (Center Top) --- */
+/* --- style.css: 検索バーのデザイン修正 --- */
+
+/* 1. 知識収集エリア（カプセル型） */
 .search-section {
     position: absolute;
-    top: 30px; /* 画面上部からの距離 */
+    top: 30px;
     left: 50%; 
-    transform: translateX(-50%); /* 左右中央揃え */
-    z-index: 20; /* 最前面 */
+    transform: translateX(-50%);
+    z-index: 20;
     
-    width: 500px; /* 幅を広めに確保 */
+    width: 600px; /* 横幅を広めに */
     max-width: 90%;
     
-    /* Glassmorphism Style */
-    background: var(--sidebar-bg);
-    padding: 10px 25px;
-    border-radius: 30px;
-    backdrop-filter: blur(15px);
-    border: var(--glass-border);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    /* カプセル型の形状 */
+    background: rgba(10, 15, 30, 0.85); /* 暗い背景 */
+    border: 1px solid rgba(102, 252, 241, 0.3); /* 青緑の枠線 */
+    border-radius: 50px; /* 完全な丸み */
+    padding: 5px; /* 内側の余白 */
     
-    display: flex;
-    flex-direction: column;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
     transition: all 0.3s ease;
 }
 
 .search-section:focus-within {
-    box-shadow: 0 0 25px rgba(102, 252, 241, 0.3);
     border-color: var(--accent-cyan);
+    box-shadow: 0 0 15px rgba(102, 252, 241, 0.2);
 }
 
 .input-container {
     display: flex;
     align-items: center;
-    gap: 15px;
     width: 100%;
+    height: 100%;
+    position: relative;
 }
 
-/* 入力欄（背景透明） */
+/* 検索アイコン（虫眼鏡） */
+.search-icon {
+    color: var(--accent-cyan);
+    font-size: 1.2rem;
+    margin-left: 20px; /* 左端からの距離 */
+    margin-right: 10px;
+}
+
+/* 入力欄 */
 #wordInput {
     background: transparent;
     border: none;
     color: white;
-    padding: 5px;
     font-size: 1.1rem;
     font-family: 'Segoe UI', sans-serif;
-    flex-grow: 1;
+    flex-grow: 1; /* 余ったスペースを埋める */
     outline: none;
+    padding: 10px 0;
 }
-#wordInput::placeholder { color: rgba(255, 255, 255, 0.4); }
 
-/* 保存ボタン */
+#wordInput::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* EXPLOREボタン（画像のようなティール色のカプセル） */
 #searchBtn {
-    background: var(--accent-dark-cyan);
+    background: var(--accent-dark-cyan); /* ベース色 */
     color: #fff;
     border: none;
-    border-radius: 20px;
-    padding: 8px 20px;
+    border-radius: 40px; /* ボタンも丸く */
+    padding: 10px 30px; /* 横幅を広く */
+    margin-right: 5px; /* 右端からの距離 */
+    
     cursor: pointer;
-    transition: all 0.3s;
+    font-family: 'Orbitron', sans-serif; /* フォントを合わせる */
     font-weight: bold;
-    white-space: nowrap;
-    font-size: 0.9rem;
     letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: all 0.3s;
 }
+
 #searchBtn:hover {
     background: var(--accent-cyan);
     color: var(--bg-space-dark);
     box-shadow: 0 0 15px var(--accent-cyan);
 }
 
-/* ステータスバー */
+/* ステータスバー（検索バーの下に少し離して表示） */
 .status-msg {
-    color: var(--accent-cyan);
-    font-size: 0.75rem;
+    position: absolute;
+    top: 60px; /* バーの下に配置 */
+    left: 0; 
+    right: 0;
     text-align: center;
-    height: 1.2em;
-    margin-top: 5px;
+    color: var(--accent-cyan);
+    font-size: 0.8rem;
     text-shadow: 0 0 5px var(--accent-dark-cyan);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    pointer-events: none; /* クリックの邪魔にならないように */
 }
 
 /* --- 2. Knowledge Card Container (Left Side) --- */
