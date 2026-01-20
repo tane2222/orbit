@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Knowledge Nexus</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0b0c10;
+            --sidebar-bg: rgba(31, 40, 51, 0.85);
+            --accent-cyan: #66fcf1;
+            --accent-dark-cyan: #45a29e;
+            --text-main: #c5c6c7;
+            --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        /* --- UI Layout --- */
+        #network {
+            width: 100%;
+            height: 100vh;
+            background: radial-gradient(circle at center, #1a1a2e 0%, #0b0c10 100%);
+        }
+
+        /* --- Header / Search Bar --- */
+        .top-bar {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 10px;
+            background: var(--sidebar-bg);
+            padding: 10px 20px;
+            border-radius: 30px;
+            backdrop-filter: blur(10px);
+            border: var(--glass-border);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            width: 60%;
+            max-width: 600px;
+        }
+
+        input#search-input {
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 1rem;
+            flex-grow: 1;
+            outline: none;
+        }
+
+        button.action-btn {
+            background: var(--accent-dark-cyan);
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+
+        button.action-btn:hover {
+            background: var(--accent-cyan);
+            color: black;
+            box-shadow: 0 0 10px var(--accent-cyan);
+        }
+
+        /* --- AI Agent Console --- */
+        .agent-console {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 320px;
+            height: 250px;
+            background: var(--sidebar-bg);
+            border-radius: 10px;
+            border: var(--glass-border);
+            backdrop-filter: blur(10px);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(102, 252, 241, 0.1);
+        }
+
+        .console-header {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            color: var(--accent-cyan);
+            border-bottom: var(--glass-border);
+        }
+
+        .console-header i { margin-right: 8px; }
+
+        .console-body {
+            flex-grow: 1;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            overflow-y: auto;
+            color: #d1d1d1;
+        }
+
+        .log-entry { margin-bottom: 5px; opacity: 0; animation: fadeIn 0.3s forwards; }
+        .log-entry.ai { color: var(--accent-cyan); }
+        .log-entry.system { color: #f0ad4e; }
+
+        /* --- Info Panel (Side) --- */
+        .info-panel {
+            position: absolute;
+            top: 100px;
+            left: 20px;
+            width: 280px;
+            background: var(--sidebar-bg);
+            border-radius: 10px;
+            padding: 20px;
+            border: var(--glass-border);
+            backdrop-filter: blur(10px);
+            z-index: 10;
+            transform: translateX(-350px);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .info-panel.active {
+            transform: translateX(0);
+        }
+
+        .info-panel h2 { color: var(--accent-cyan); margin-top: 0; }
+        .info-panel p { line-height: 1.6; font-size: 0.9rem; }
+        
+        .tag {
+            display: inline-block;
+            background: rgba(102, 252, 241, 0.2);
+            color: var(--accent-cyan);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+        /* --- Controls --- */
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        @keyframes fadeIn { to { opacity: 1; } }
+
+    </style>
+</head>
+<body>
+
+    <div id="network"></div>
+
+    <div class="top-bar">
+        <i class="fas fa-search" style="color: var(--accent-cyan); align-self: center;"></i>
+        <input type="text" id="search-input" placeholder="調査したい業界用語やトピックを入力...">
+        <button class="action-btn" onclick="triggerSearch()">Research</button>
+    </div>
+
+    <div class="info-panel" id="info-panel">
+        <h2 id="panel-title">Node Title</h2>
+        <div id="panel-tags"></div>
+        <p id="panel-desc">ここに詳細情報が表示されます。</p>
+        <div class="controls">
+            <button class="action-btn" style="background: #e94560;" onclick="deleteSelectedNode()">Delete</button>
+            <button class="action-btn" onclick="closePanel()">Close</button>
+        </div>
+    </div>
+
+    <div class="agent-console">
+        <div class="console-header">
+            <i class="fas fa-robot"></i> AI AGENT STATUS: ONLINE
+        </div>
+        <div class="console-body" id="console-logs">
+            <div class="log-entry system">> System initialized.</div>
+            <div class="log-entry system">> Waiting for input...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. Initialization & Data ---
+        // ノード（知識）の初期データ
+        let nodes = new vis.DataSet([
+            { id: 1, label: "AI Agent", group: "core", title: "Core System", description: "システムの中核となる自律型エージェント。" },
+            { id: 2, label: "Web Search", group: "tool", title: "Search Module", description: "外部情報を取得するためのモジュール。" },
+            { id: 3, label: "Knowledge Graph", group: "storage", title: "Graph DB", description: "知識を構造化して保存するデータベース。" }
+        ]);
+
+        // エッジ（関連性）の初期データ
+        let edges = new vis.DataSet([
+            { from: 1, to: 2, arrows: "to" },
+            { from: 1, to: 3, arrows: "to" }
+        ]);
+
+        // ネットワークの設定
+        const container = document.getElementById('network');
+        const data = { nodes: nodes, edges: edges };
+        const options = {
+            nodes: {
+                shape: 'dot',
+                size: 20,
+                font: { size: 14, color: '#ffffff' },
+                borderWidth: 2,
+                shadow: true
+            },
+            edges: {
+                width: 2,
+                color: { color: '#45a29e', highlight: '#66fcf1' },
+                shadow: true,
+                smooth: { type: "continuous" }
+            },
+            groups: {
+                core: { color: { background: '#e94560', border: '#e94560' }, size: 30 },
+                tool: { color: { background: '#f0ad4e', border: '#f0ad4e' } },
+                storage: { color: { background: '#66fcf1', border: '#66fcf1' } },
+                generated: { color: { background: '#ffffff', border: '#cccccc' } }
+            },
+            physics: {
+                stabilization: false,
+                barnesHut: { gravitationalConstant: -3000, springConstant: 0.04, springLength: 95 }
+            },
+            interaction: { hover: true }
+        };
+
+        const network = new vis.Network(container, data, options);
+
+        // --- 2. Interaction Logic ---
+
+        // ノードクリック時のイベント
+        network.on("click", function (params) {
+            if (params.nodes.length > 0) {
+                const nodeId = params.nodes[0];
+                const nodeData = nodes.get(nodeId);
+                showPanel(nodeData);
+            } else {
+                closePanel();
+            }
+        });
+
+        function showPanel(node) {
+            document.getElementById('panel-title').innerText = node.label;
+            document.getElementById('panel-desc').innerText = node.description || "No description available.";
+            
+            // Tag generation (Mock)
+            const tagsDiv = document.getElementById('panel-tags');
+            tagsDiv.innerHTML = `<span class="tag">${node.group}</span><span class="tag">#ID:${node.id}</span>`;
+            
+            document.getElementById('info-panel').classList.add('active');
+        }
+
+        function closePanel() {
+            document.getElementById('info-panel').classList.remove('active');
+            network.unselectAll();
+        }
+
+        function deleteSelectedNode() {
+            const selected = network.getSelectedNodes();
+            if (selected.length > 0) {
+                nodes.remove(selected);
+                edges.remove(network.getSelectedEdges());
+                closePanel();
+                logToConsole("Node deleted from database.", "system");
+            }
+        }
+
+        // --- 3. AI Simulation Logic ---
+
+        function logToConsole(text, type = "ai") {
+            const consoleBody = document.getElementById('console-logs');
+            const div = document.createElement('div');
+            div.className = `log-entry ${type}`;
+            div.innerText = `> ${text}`;
+            consoleBody.appendChild(div);
+            consoleBody.scrollTop = consoleBody.scrollHeight;
+        }
+
+        async function triggerSearch() {
+            const input = document.getElementById('search-input');
+            const term = input.value;
+            if (!term) return;
+
+            // UI Reset
+            input.value = "";
+            
+            // Simulation Sequence
+            logToConsole(`Searching web for: "${term}"...`);
+            await wait(1000);
+            
+            logToConsole(`Analyzing semantic connections...`);
+            await wait(800);
+
+            logToConsole(`3 related concepts found.`);
+            await wait(500);
+
+            // Mock: Add new nodes centered around the search term
+            createKnowledgeCluster(term);
+        }
+
+        function createKnowledgeCluster(centerTerm) {
+            // 中心ノードの追加
+            const centerId = Math.floor(Math.random() * 10000);
+            nodes.add({
+                id: centerId,
+                label: centerTerm,
+                group: 'generated',
+                description: `AIによってウェブから自動生成された "${centerTerm}" に関する概要情報です。`
+            });
+
+            // 既存のノード（ランダム）と接続して文脈を作る
+            const existingIds = nodes.getIds();
+            const randomTarget = existingIds[Math.floor(Math.random() * existingIds.length)];
+            if(randomTarget !== centerId) {
+                edges.add({ from: randomTarget, to: centerId });
+            }
+
+            // 関連用語の生成（モック）
+            const relatedTerms = ["Trends", "Tech Stack", "History"];
+            relatedTerms.forEach((rel, index) => {
+                const subId = centerId + index + 1;
+                nodes.add({
+                    id: subId,
+                    label: `${centerTerm} ${rel}`,
+                    group: 'tool',
+                    description: `${centerTerm}に関する${rel}の詳細データ。`
+                });
+                edges.add({ from: centerId, to: subId });
+            });
+
+            logToConsole(`Knowledge graph updated: +4 nodes.`, "system");
+            network.fit(); // カメラ位置調整
+        }
+
+        function wait(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Enterキーで検索
+        document.getElementById('search-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                triggerSearch();
+            }
+        });
+
+    </script>
+</body>
+</html>
