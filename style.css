@@ -312,3 +312,113 @@ button.action-btn:hover { background: var(--accent-cyan); color: var(--bg-space-
     width: 100%;
     text-align: center;
 }
+
+
+
+
+
+/* --- style.css 修正箇所 --- */
+
+/* 1. 知識収集エリア（画面中央上に配置） */
+.search-section {
+    position: absolute;
+    top: 30px; /* 画面上部からの距離 */
+    left: 50%; 
+    transform: translateX(-50%); /* 左右中央揃え */
+    z-index: 20; /* 最前面 */
+    
+    width: 500px; /* 幅を広めに確保 */
+    max-width: 90%;
+    
+    /* 以前のデザインを踏襲したGlassmorphismスタイル */
+    background: var(--sidebar-bg);
+    padding: 10px 25px;
+    border-radius: 30px;
+    backdrop-filter: blur(15px);
+    border: var(--glass-border);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+.search-section:focus-within {
+    box-shadow: 0 0 25px rgba(102, 252, 241, 0.3);
+    border-color: var(--accent-cyan);
+}
+
+.input-container {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+}
+
+/* 入力欄（背景透明にしてスッキリさせる） */
+#wordInput {
+    background: transparent;
+    border: none;
+    color: white;
+    padding: 5px;
+    font-size: 1.1rem;
+    font-family: 'Segoe UI', sans-serif;
+    flex-grow: 1; /* 横幅いっぱい使う */
+    outline: none;
+}
+
+#wordInput::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* 保存ボタン */
+#searchBtn {
+    background: var(--accent-dark-cyan);
+    color: #fff;
+    border: none;
+    border-radius: 20px; /* 丸みを帯びさせる */
+    padding: 8px 20px;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-weight: bold;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    letter-spacing: 1px;
+}
+
+#searchBtn:hover {
+    background: var(--accent-cyan);
+    color: var(--bg-space-dark);
+    box-shadow: 0 0 15px var(--accent-cyan);
+}
+
+/* ステータスバー（入力欄のすぐ下に小さく表示） */
+.status-msg {
+    color: var(--accent-cyan);
+    font-size: 0.75rem;
+    text-align: center;
+    height: 1.2em; /* 高さを確保してガタつき防止 */
+    margin-top: 5px;
+    text-shadow: 0 0 5px var(--accent-dark-cyan);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 2. 知識カード表示エリア（位置調整） */
+/* バーが中央に行ったので、左側のカードリストは少し上から始めてOK */
+#cardContainer {
+    position: absolute;
+    top: 120px; /* 左上ロゴの下あたりから開始 */
+    left: 30px;
+    width: 300px;
+    bottom: 20px;
+    overflow-y: auto;
+    z-index: 14;
+    padding-right: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-dark-cyan) transparent;
+}
