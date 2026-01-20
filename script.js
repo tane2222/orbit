@@ -250,7 +250,7 @@ if (captureBtn) {
             statusMessage.textContent = "Error!";
         } finally {
             captureBtn.disabled = false;
-            captureBtn.innerHTML = '<i class="fas fa-download"></i> 解析・保存';
+            captureBtn.innerHTML = 'EXPLORE'; // ボタンの文言を合わせました
             setTimeout(() => { statusMessage.textContent = ""; }, 3000);
         }
     });
@@ -258,11 +258,13 @@ if (captureBtn) {
 
 // --- 5. Chat Assistant Logic (Context-Aware RAG) ---
 
-// --- 5. Chat Assistant Logic (修正版) ---
-
-// ★追加: Firestoreから過去の知識を取得してテキスト化する関数（変更なし）
 async function getRecentContext() {
-    if (!nodes || nodes.length === 0) return "";
+    if (!nodes) return "";
+
+    // nodesがまだDataSetとして機能していない場合は空を返す
+    try {
+        if (nodes.length === 0 && typeof nodes.get !== 'function') return "";
+    } catch(e) { return ""; }
 
     // Vis.jsのnodesデータセットから、保存済みの知識（summary）を抽出
     const contextData = nodes.get({
@@ -273,16 +275,16 @@ async function getRecentContext() {
 
     if (contextData.length === 0) return "";
 
-    // 最新順（ID順やタイムスタンプ順ではない場合があるので、本来はソート推奨だが簡易的にそのまま）
+    // 最新順（簡易的に配列の最後から取得）
     // テキストに整形
-    const contextText = contextData.slice(0, 15).map(item => {
+    const contextText = contextData.slice(-15).reverse().map(item => {
         return `- 【${item.label}】: ${item.title || "概要なし"}`;
     }).join("\n");
 
     return contextText;
 }
 
-// メッセージ表示ヘルパー（変更なし）
+// メッセージ表示ヘルパー
 function appendMessage(text, type) {
     const history = document.getElementById('chat-history');
     if (!history) return;
@@ -295,13 +297,13 @@ function appendMessage(text, type) {
     history.scrollTop = history.scrollHeight;
 }
 
-// ログ出力をチャットシステムに統合（変更なし）
+// ログ出力をチャットシステムに統合
 window.logToConsole = function(text, type = "system") {
     const msgType = (type === 'ai' || type === 'error') ? 'system' : type;
     appendMessage(`>> ${text}`, msgType);
 }
 
-// ★修正: コンテキストを考慮したチャット送信処理
+// コンテキストを考慮したチャット送信処理
 window.sendChat = async function() {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
@@ -331,12 +333,11 @@ window.sendChat = async function() {
         // ★ 過去の知識を取得
         const context = await getRecentContext();
         
-        // デバッグ用: コンソールでデータが取れているか確認（F12キーで見れます）
-        console.log("Injecting Context:", context);
+        console.log("Injecting Context:", context); // デバッグ用
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         
-        // ★ プロンプト修正: AIに「これが直近の履歴だ」と強く認識させる
+        // ★ プロンプト
         const prompt = `
         You are "Orbit Assistant", an expert IT consultant.
         
