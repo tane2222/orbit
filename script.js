@@ -256,7 +256,38 @@ if (captureBtn) {
     });
 }
 
-// --- 5. Chat Assistant Logic (NEW) ---
+// --- 5. Chat Assistant Logic (Context-Aware RAG) ---
+
+// ★追加: Firestoreから過去の知識を取得してテキスト化する関数
+async function getRecentContext() {
+    if (!firestore) return "";
+    
+    // 最新の20件を取得（トークン過多を防ぐため制限）
+    // 本格化するならここでベクトル検索を使いますが、まずは「直近の学習内容」を参照させます
+    const q = query(collection(firestore, "knowledge_base"), orderBy("timestamp", "desc"));
+    
+    // 一度取得（リアルタイムリスナーではなく、都度取得）
+    // onSnapshotではなくgetDocsを使いたいところですが、
+    // インポートを増やさないため、簡易的に既存のnodesデータやcardContainerのデータを利用もできますが、
+    // ここでは正確を期して、既存のリスナーで同期されている `nodes` データセットを活用します。
+    
+    if (!nodes || nodes.length === 0) return "No knowledge stored yet.";
+
+    // Vis.jsのnodesデータセットから、保存済みの知識（summary）を抽出
+    const contextData = nodes.get({
+        filter: function (item) {
+            return item.group === 'knowledge'; // メインの知識ノードのみ
+        }
+    });
+
+    // テキストに整形
+    // 例: "- アジャイル開発: 短いサイクルで... (関連: スクラム)"
+    const contextText = contextData.slice(0, 20).map(item => {
+        return `- 【${item.label}】: ${item.title || "概要なし"}`;
+    }).join("\n");
+
+    return contextText;
+}
 
 // メッセージ表示ヘルパー
 function appendMessage(text, type) {
@@ -271,14 +302,13 @@ function appendMessage(text, type) {
     history.scrollTop = history.scrollHeight;
 }
 
-// 既存のログ出力をチャットシステムに統合
+// ログ出力をチャットシステムに統合
 window.logToConsole = function(text, type = "system") {
-    // "ai" や "error" タイプも、システムメッセージとして表示
     const msgType = (type === 'ai' || type === 'error') ? 'system' : type;
     appendMessage(`>> ${text}`, msgType);
 }
 
-// チャット送信処理
+// ★修正: コンテキストを考慮したチャット送信処理
 window.sendChat = async function() {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
@@ -288,7 +318,6 @@ window.sendChat = async function() {
     appendMessage(text, 'user');
     input.value = '';
 
-    // APIチェック
     const apiKey = (CONFIG.openai || "").trim();
     if (!apiKey) {
         appendMessage("Error: API Key is missing in Settings.", "system");
@@ -301,20 +330,30 @@ window.sendChat = async function() {
     const loadingDiv = document.createElement('div');
     loadingDiv.className = 'chat-msg ai';
     loadingDiv.id = loadingId;
-    loadingDiv.innerHTML = '<i class="fas fa-ellipsis-h fa-fade"></i> thinking...';
+    loadingDiv.innerHTML = '<i class="fas fa-ellipsis-h fa-fade"></i> Connecting dots...';
     history.appendChild(loadingDiv);
     history.scrollTop = history.scrollHeight;
 
-    // 3. AIへのリクエスト
     try {
+        // ★ ここで過去の知識を取得
+        const context = await getRecentContext();
+
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         
-        // チャット用プロンプト
+        // ★ プロンプトに「ユーザーの知識ベース」を注入
         const prompt = `
-        You are "Orbit Assistant", an expert IT consultant.
-        Answer the following question from the user concisely in Japanese.
-        Use a professional but helpful tone.
-        User Question: ${text}
+        You are "Orbit Assistant", an expert IT consultant utilizing the user's personal knowledge base.
+        
+        [USER'S KNOWLEDGE BASE (PREVIOUSLY LEARNED TERMS)]:
+        ${context}
+
+        [INSTRUCTION]:
+        Answer the user's question in Japanese.
+        IMPORTANT: If the user's question relates to any term in the KNOWLEDGE BASE above, explicitly mention the connection (e.g., "以前学習した〇〇と似ていますが...").
+        If the answer is not in the knowledge base, answer using your general knowledge but suggest related topics from the base if possible.
+
+        [USER QUESTION]:
+        ${text}
         `;
 
         const res = await fetch(url, {
@@ -326,7 +365,6 @@ window.sendChat = async function() {
         const json = await res.json();
         const aiResponse = json.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't process that.";
 
-        // ローディング削除・回答表示
         const loader = document.getElementById(loadingId);
         if(loader) loader.remove();
         appendMessage(aiResponse, 'ai');
