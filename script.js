@@ -156,7 +156,7 @@ async function getAISummary(topic, searchResults) {
     logToConsole(`Gemini AI analyzing data constellation for "${topic}"...`, "ai");
     const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
     const prompt = `Topic: ${topic}\nContext:\n${context}\nTask: Summarize the relationship between these concepts and the topic in Japanese. Be concise and insightful for a knowledge graph perspective (max 120 words). Format as plain text.`;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     try {
         const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
         const json = await res.json();
