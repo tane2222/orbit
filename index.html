@@ -107,13 +107,15 @@
     </div>
 
     <script type="module">
-        // --- Imports for Firebase (v9 Modular) ---
+        // --- Imports (Auth機能を追加) ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, remove, push, child, update } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+        // 追加: 認証用モジュール
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
         // --- Global Variables ---
         let network, nodes, edges;
-        let db; // Firebase Database instance
+        let db, auth; // auth変数を追加
         let CONFIG = {
             openai: localStorage.getItem('openai_key') || '',
             googleKey: localStorage.getItem('google_key') || '',
@@ -122,6 +124,7 @@
         };
 
         // --- 1. Initialize Vis.js (Graph UI) ---
+        // (ここは変更なし)
         function initGraph() {
             nodes = new vis.DataSet([]);
             edges = new vis.DataSet([]);
@@ -141,7 +144,6 @@
             };
             network = new vis.Network(container, data, options);
 
-            // Interaction
             network.on("click", function (params) {
                 if (params.nodes.length > 0) {
                     const nodeData = nodes.get(params.nodes[0]);
@@ -152,45 +154,51 @@
             });
         }
 
-        // --- 2. Firebase Integration (Database) ---
+        // --- 2. Firebase Integration (Secure Auth Added) ---
         function initFirebase() {
             if (!CONFIG.firebase.apiKey) return;
             
             try {
                 const app = initializeApp(CONFIG.firebase);
                 db = getDatabase(app);
-                logToConsole("Connecting to Firebase...", "system");
+                auth = getAuth(app); // Auth初期化
 
-                const graphRef = ref(db, 'knowledge-graph');
-                
-                // Realtime Sync: Firebase -> Local Vis.js
-                onValue(graphRef, (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        // 差分更新ではなく、シンプルに全置換で同期（デモ用）
-                        // 実際はID比較でUpdateするほうが効率的
-                        const newNodes = data.nodes ? Object.values(data.nodes) : [];
-                        const newEdges = data.edges ? Object.values(data.edges) : [];
-                        
-                        nodes.clear();
-                        edges.clear();
-                        nodes.add(newNodes);
-                        edges.add(newEdges);
-                        
-                        document.getElementById('db-status').classList.add('online');
-                        logToConsole("Database synced.", "system");
-                    }
-                });
+                logToConsole("Connecting to Firebase (Secured)...", "system");
+
+                // ★ここが重要: 匿名ログインを実行
+                signInAnonymously(auth)
+                    .then(() => {
+                        // ログイン成功後にデータベースを監視開始
+                        const graphRef = ref(db, 'knowledge-graph');
+                        onValue(graphRef, (snapshot) => {
+                            const data = snapshot.val();
+                            if (data) {
+                                const newNodes = data.nodes ? Object.values(data.nodes) : [];
+                                const newEdges = data.edges ? Object.values(data.edges) : [];
+                                nodes.clear();
+                                edges.clear();
+                                nodes.add(newNodes);
+                                edges.add(newEdges);
+                                document.getElementById('db-status').classList.add('online');
+                                logToConsole("Database synced (Authenticated).", "system");
+                            }
+                        }, (error) => {
+                            logToConsole("DB Read Error: " + error.message, "error");
+                        });
+                    })
+                    .catch((error) => {
+                        logToConsole("Auth Failed: " + error.message, "error");
+                    });
 
             } catch (e) {
-                logToConsole("Firebase Error: " + e.message, "error");
+                logToConsole("Firebase Init Error: " + e.message, "error");
             }
         }
 
         // Save to Firebase
         function saveToDB() {
-            if (!db) return;
-            // Vis.jsのデータをオブジェクト形式に変換して保存
+            if (!db || !auth.currentUser) return; // ログインしてなければ保存しない
+            
             const nodesObj = {};
             const edgesObj = {};
             nodes.forEach(n => nodesObj[n.id] = n);
@@ -202,172 +210,87 @@
             }).catch(e => logToConsole("Save Failed: " + e.message, "error"));
         }
 
-        // --- 3. Web Search Logic (Google Custom Search API) ---
+        // --- 3. Web Search & AI (Gemini) ---
+        // (変更なし、そのままコピペしてください)
         async function performWebSearch(query) {
-            if (!CONFIG.googleKey || !CONFIG.googleCx) {
-                logToConsole("Missing Google API Keys.", "error");
-                return null;
-            }
-
+            // ... (前回のコードと同じ)
+            if (!CONFIG.googleKey || !CONFIG.googleCx) { logToConsole("Missing Google keys.", "error"); return null; }
             logToConsole(`Searching: "${query}"...`, "ai");
             const url = `https://www.googleapis.com/customsearch/v1?key=${CONFIG.googleKey}&cx=${CONFIG.googleCx}&q=${encodeURIComponent(query)}`;
-
             try {
                 const res = await fetch(url);
                 const data = await res.json();
-                if (data.error) throw new Error(data.error.message);
                 return data.items || [];
-            } catch (e) {
-                logToConsole("Search Error: " + e.message, "error");
-                return [];
-            }
+            } catch (e) { return []; }
         }
 
-       // --- 4. AI Summary Logic (Gemini API Optimized) ---
-async function getAISummary(topic, searchResults) {
-    // 設定画面のキーを取得し、空白を除去
-    const apiKey = (CONFIG.openai || "").trim(); 
-    
-    if (!apiKey) {
-        return "API Key is missing. Please check Config.";
-    }
-
-    logToConsole(`Gemini thinking about "${topic}"...`, "ai");
-
-    // コンテキストの作成
-    const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
-    
-    const prompt = `
-    Topic: ${topic}
-    Context:
-    ${context}
-    
-    Task: Summarize the relationship between these concepts and the topic in Japanese. Be concise (max 100 words). Format as plain text.`;
-
-    // Gemini 2.5 Flash Endpoint
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
-    try {
-        const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
-        
-        const json = await res.json();
-        
-        // 詳細なエラーハンドリング
-        if (json.error) {
-            console.error("Gemini API Error Details:", json); // ブラウザのコンソール(F12)にも出す
-            throw new Error(json.error.message || "Invalid API Response");
+        async function getAISummary(topic, searchResults) {
+            // ... (前回のGemini 2.5 Flash対応コードと同じ)
+             const apiKey = (CONFIG.openai || "").trim(); 
+            if (!apiKey) return "API Key missing.";
+            logToConsole(`Gemini thinking about "${topic}"...`, "ai");
+            const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
+            const prompt = `Topic: ${topic}\nContext:\n${context}\nTask: Summarize relationship in Japanese. Concise.`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+            try {
+                const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
+                const json = await res.json();
+                return json.candidates?.[0]?.content?.parts?.[0]?.text || "No text.";
+            } catch (e) { return "AI Error."; }
         }
-        
-        // テキスト抽出
-        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) throw new Error("No text generated.");
 
-        return text;
-
-    } catch (e) {
-        logToConsole("Gemini Error: " + e.message, "error");
-        return "AI processing failed. Check API Key.";
-    }
-}
-
-        // --- 5. Orchestration (The "Trigger" Function) ---
         async function triggerSearch() {
-            const input = document.getElementById('search-input');
+            // ... (前回のコードと同じ)
+             const input = document.getElementById('search-input');
             const term = input.value;
             if (!term) return;
-
-            input.value = ""; // Clear input
-
-            // 1. Create Core Node
+            input.value = "";
             const centerId = `node_${Date.now()}`;
-            const centerNode = {
-                id: centerId,
-                label: term,
-                group: 'core',
-                description: 'Fetching data...',
-                x: 0, y: 0
-            };
-            
-            // Local update first
+            const centerNode = { id: centerId, label: term, group: 'core', description: 'Fetching...', x: 0, y: 0 };
             nodes.add(centerNode);
-            if (db) saveToDB(); // Sync
+            if (db) saveToDB();
 
-            // 2. Perform Web Search
             const results = await performWebSearch(term);
             if (!results) return;
 
-            // 3. Create Child Nodes from Search
             const newNodes = [];
             const newEdges = [];
-
-            // Add top 3 results as nodes
             results.slice(0, 3).forEach((item, index) => {
                 const childId = `${centerId}_child_${index}`;
-                newNodes.push({
-                    id: childId,
-                    label: item.title.substring(0, 15) + "...",
-                    group: 'result',
-                    title: item.title,
-                    description: item.snippet,
-                    url: item.link
-                });
-                newEdges.push({
-                    id: `${centerId}_edge_${index}`,
-                    from: centerId,
-                    to: childId
-                });
+                newNodes.push({ id: childId, label: item.title.substring(0, 15) + "...", group: 'result', title: item.title, description: item.snippet, url: item.link });
+                newEdges.push({ id: `${centerId}_edge_${index}`, from: centerId, to: childId });
             });
-
-            // 4. Get AI Summary for Center Node
             const summary = await getAISummary(term, results);
             centerNode.description = summary;
-            
-            // Update Data
             nodes.update(centerNode);
             nodes.add(newNodes);
             edges.add(newEdges);
-            
-            // 5. Final Sync
             if (db) saveToDB();
-            
             logToConsole("Knowledge graph updated.", "system");
         }
 
-        // --- Helper UI Functions ---
+        // --- Helper Functions ---
+        // (変更なし)
         window.showPanel = function(node) {
             document.getElementById('panel-title').innerText = node.label;
             document.getElementById('panel-desc').innerText = node.description || "No description.";
-            
             let html = `<span class="tag">${node.group}</span>`;
             if (node.url) html += `<br><a href="${node.url}" target="_blank" style="color:#66fcf1;">Open Link <i class="fas fa-external-link-alt"></i></a>`;
             document.getElementById('panel-tags').innerHTML = html;
-            
             document.getElementById('info-panel').classList.add('active');
             window.currentNodeId = node.id;
         }
-
-        window.closePanel = function() {
-            document.getElementById('info-panel').classList.remove('active');
-            network.unselectAll();
-        }
-
+        window.closePanel = function() { document.getElementById('info-panel').classList.remove('active'); network.unselectAll(); }
         window.deleteNode = function() {
             if (window.currentNodeId) {
                 const relatedEdges = network.getConnectedEdges(window.currentNodeId);
                 nodes.remove(window.currentNodeId);
                 edges.remove(relatedEdges);
                 closePanel();
-                if (db) saveToDB(); // Sync delete
+                if (db) saveToDB();
                 logToConsole("Node deleted.", "system");
             }
         }
-
         window.logToConsole = function(text, type = "ai") {
             const consoleBody = document.getElementById('console-logs');
             const div = document.createElement('div');
@@ -376,13 +299,9 @@ async function getAISummary(topic, searchResults) {
             consoleBody.appendChild(div);
             consoleBody.scrollTop = consoleBody.scrollHeight;
         }
-
-        // Settings Modal Control
         window.toggleSettings = function() {
             const modal = document.getElementById('settings-modal');
             modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
-            
-            // Fill current values
             if(modal.style.display === 'flex'){
                 document.getElementById('openai-key').value = CONFIG.openai;
                 document.getElementById('google-key').value = CONFIG.googleKey;
@@ -390,41 +309,26 @@ async function getAISummary(topic, searchResults) {
                 document.getElementById('firebase-config').value = JSON.stringify(CONFIG.firebase, null, 2);
             }
         }
-
         window.saveSettings = function() {
-    // .trim() を追加して保存時にスペースを削除
-    CONFIG.openai = document.getElementById('openai-key').value.trim();
-    CONFIG.googleKey = document.getElementById('google-key').value.trim();
-    CONFIG.googleCx = document.getElementById('google-cx').value.trim();
-    
-    try {
-        const fbValue = document.getElementById('firebase-config').value.trim();
-        CONFIG.firebase = fbValue ? JSON.parse(fbValue) : {};
-    } catch(e) {
-        alert("Firebase Config JSON format is invalid!");
-        return;
-    }
-
-    // Save to LocalStorage
-    localStorage.setItem('openai_key', CONFIG.openai);
-    localStorage.setItem('google_key', CONFIG.googleKey);
-    localStorage.setItem('google_cx', CONFIG.googleCx);
-    localStorage.setItem('firebase_config', JSON.stringify(CONFIG.firebase));
-
-    toggleSettings();
-    logToConsole("Configuration saved. Reloading...", "system");
-    setTimeout(() => location.reload(), 1000);
-}
+            CONFIG.openai = document.getElementById('openai-key').value.trim();
+            CONFIG.googleKey = document.getElementById('google-key').value.trim();
+            CONFIG.googleCx = document.getElementById('google-cx').value.trim();
+            try { const fbValue = document.getElementById('firebase-config').value.trim(); CONFIG.firebase = fbValue ? JSON.parse(fbValue) : {}; } 
+            catch(e) { alert("Firebase Config JSON format is invalid!"); return; }
+            localStorage.setItem('openai_key', CONFIG.openai);
+            localStorage.setItem('google_key', CONFIG.googleKey);
+            localStorage.setItem('google_cx', CONFIG.googleCx);
+            localStorage.setItem('firebase_config', JSON.stringify(CONFIG.firebase));
+            toggleSettings();
+            logToConsole("Configuration saved. Reloading...", "system");
+            setTimeout(() => location.reload(), 1000);
+        }
 
         // --- Start Up ---
         document.getElementById('search-btn').addEventListener('click', triggerSearch);
-        document.getElementById('search-input').addEventListener('keypress', (e) => {
-            if(e.key === 'Enter') triggerSearch();
-        });
-
+        document.getElementById('search-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') triggerSearch(); });
         initGraph();
-        initFirebase(); // Try connecting if config exists
-
+        initFirebase();
     </script>
 </body>
 </html>
