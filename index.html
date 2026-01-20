@@ -223,15 +223,19 @@
             }
         }
 
-        // --- 4. AI Summary Logic (OpenAI API) ---
+       // --- 4. AI Summary Logic (Switched to Gemini API) ---
         async function getAISummary(topic, searchResults) {
-            if (!CONFIG.openai) {
+            // 設定画面の "OpenAI Key" 欄に Geminiのキーを入れて使います
+            // ※便宜上 CONFIG.openai をそのまま使いますが、中身はGeminiキーと想定します
+            const apiKey = CONFIG.openai; 
+            
+            if (!apiKey) {
                 return "API Key missing. Cannot generate summary.";
             }
 
-            logToConsole(`AI generating summary for "${topic}"...`, "ai");
+            logToConsole(`Gemini generating summary for "${topic}"...`, "ai");
 
-            // Prepare context from search results (top 3)
+            // Prepare context
             const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
             
             const prompt = `
@@ -241,23 +245,31 @@
             
             Task: Summarize the relationship between these concepts and the topic in Japanese. Be concise (max 100 words). Format as plain text.`;
 
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
             try {
-                const res = await fetch("https://api.openai.com/v1/chat/completions", {
+                const res = await fetch(url, {
                     method: "POST",
                     headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${CONFIG.openai}`
+                        "Content-Type": "application/json"
                     },
                     body: JSON.stringify({
-                        model: "gpt-4o-mini", // Cost effective model
-                        messages: [{ role: "user", content: prompt }],
-                        temperature: 0.7
+                        contents: [{
+                            parts: [{ text: prompt }]
+                        }]
                     })
                 });
+                
                 const json = await res.json();
-                return json.choices[0].message.content;
+                
+                if (json.error) throw new Error(json.error.message);
+                
+                // Geminiのレスポンス構造からテキストを抽出
+                const text = json.candidates[0].content.parts[0].text;
+                return text;
+
             } catch (e) {
-                logToConsole("AI Error: " + e.message, "error");
+                logToConsole("Gemini Error: " + e.message, "error");
                 return "AI processing failed.";
             }
         }
