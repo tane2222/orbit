@@ -1,14 +1,15 @@
 // --- Imports ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+// ★ deleteDoc, doc を追加
+import { getFirestore, collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 // --- Global Variables ---
 let network, nodes, edges;
 let firestore;
 let auth;
 let CONFIG = {
-    openai: localStorage.getItem('openai_key') || '', // Gemini Key
+    openai: localStorage.getItem('openai_key') || '', 
     googleKey: localStorage.getItem('google_key') || '',
     googleCx: localStorage.getItem('google_cx') || '',
     firebase: JSON.parse(localStorage.getItem('firebase_config') || '{}')
@@ -24,7 +25,6 @@ function initGraph() {
 
     const data = { nodes: nodes, edges: edges };
     
-    // 宇宙テーマの設定
     const options = {
         nodes: {
             shape: 'dot',
@@ -76,6 +76,13 @@ function initGraph() {
                 scale: 1.2,
                 animation: { duration: 800, easingFunction: 'easeInOutQuad' }
             });
+            
+            // ★追加: グラフ上のノードをクリックした時の処理
+            const nodeId = params.nodes[0];
+            const node = nodes.get(nodeId);
+            if(node) {
+                showPanel(node); // 詳細パネルを表示
+            }
         }
     });
 }
@@ -93,6 +100,7 @@ function initFirebase() {
         signInAnonymously(auth)
             .then(() => {
                 syncKnowledgeBase();
+                syncMemos(); // ★追加: メモの同期
             })
             .catch((error) => { logToConsole("Auth Failed: " + error.message, "error"); });
     } catch (e) { logToConsole("Init Error: " + e.message, "error"); }
@@ -107,15 +115,19 @@ function syncKnowledgeBase() {
     onSnapshot(q, (snapshot) => {
         if(cardContainer) cardContainer.innerHTML = "";
         
+        // 差分更新ではなく全クリア再描画（シンプルさ優先）
+        // ※削除された場合も自動で消えるように nodes.clear() します
         nodes.clear();
         edges.clear();
 
-        snapshot.forEach((doc) => {
-            const data = doc.data();
-            const docId = doc.id;
+        snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const docId = docSnap.id;
 
-            if(cardContainer) createCardElement(data, cardContainer);
+            // A. サイドバーにカードを追加（IDを渡す）
+            if(cardContainer) createCardElement(data, docId, cardContainer);
 
+            // B. グラフにノードを追加
             try {
                 nodes.add({
                     id: docId,
@@ -143,11 +155,36 @@ function syncKnowledgeBase() {
                     });
                 }
             } catch (e) {
-                console.log("Graph update skip: Duplicate or error");
+                // 重複などでエラーが出ても無視
             }
         });
         
-        logToConsole(`Visualizing ${snapshot.size} knowledge clusters.`, "system");
+        logToConsole(`Synced ${snapshot.size} knowledge clusters.`, "system");
+    });
+}
+
+// ★追加: メモ機能の同期
+function syncMemos() {
+    const memoContainer = document.getElementById('memoContainer');
+    if (!firestore || !memoContainer) return;
+
+    const q = query(collection(firestore, "memos"), orderBy("timestamp", "desc"));
+
+    onSnapshot(q, (snapshot) => {
+        memoContainer.innerHTML = "";
+        snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const div = document.createElement('div');
+            div.className = 'memo-item';
+            div.innerHTML = `
+                <span>${data.text}</span>
+                <div class="memo-actions">
+                    <i class="fas fa-search" onclick="analyzeFromMemo('${data.text}', '${docSnap.id}')" title="Explore"></i>
+                    <i class="fas fa-trash" onclick="deleteMemo('${docSnap.id}')" title="Delete"></i>
+                </div>
+            `;
+            memoContainer.appendChild(div);
+        });
     });
 }
 
@@ -161,11 +198,11 @@ async function analyzeAndSave(word) {
     Output ONLY valid JSON:
     {
       "word": "${word}",
-      "category": "Broad Category (e.g. Cloud, Dev, AI)",
+      "category": "Category",
       "summary": "Simple definition (Japanese, max 80 chars).",
       "analogy": "Real-world analogy (Japanese).",
       "key_players": [{"name": "Name", "role": "Role"}],
-      "related_terms": ["Term1", "Term2", "Term3"]
+      "related_terms": ["Term1", "Term2"]
     }
     Respond in Japanese.
     `;
@@ -186,9 +223,35 @@ async function analyzeAndSave(word) {
     return JSON.parse(rawText);
 }
 
-// --- 4. DOM Elements & Event Listeners ---
+// ★追加: もっと詳しく要約する機能 (Detail)
+async function getDetailedSummary(word) {
+    const apiKey = (CONFIG.openai || "").trim();
+    if (!apiKey) return "API Key missing.";
 
-function createCardElement(data, container) {
+    const prompt = `
+    Explain the term "${word}" in detail for an IT professional.
+    Structure:
+    1. Detailed Definition
+    2. Historical Background or Context
+    3. Pros & Cons
+    4. Main Use Cases
+    Respond in Japanese. Output plain text (Markdown allowed).
+    `;
+    
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+    const json = await res.json();
+    return json.candidates?.[0]?.content?.parts?.[0]?.text || "No details found.";
+}
+
+// --- 4. DOM Elements & UI Functions ---
+
+// ★修正: IDを受け取り、削除ボタンと詳細ボタンを追加
+function createCardElement(data, docId, container) {
     const card = document.createElement('div');
     card.className = 'knowledge-card';
     const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : 'Just now';
@@ -200,6 +263,7 @@ function createCardElement(data, container) {
         ).join('');
     }
 
+    // カードHTML構築
     card.innerHTML = `
       <div class="card-header">
         <h3 class="card-title">${data.word}</h3>
@@ -208,12 +272,118 @@ function createCardElement(data, container) {
       <div class="card-summary">${data.summary}</div>
       ${data.analogy ? `<div style="font-size:0.8rem; color:#888; margin-bottom:10px; padding:8px; background:rgba(0,0,0,0.2); border-radius:5px;"><i class="fas fa-lightbulb" style="color:#ffd700;"></i> ${data.analogy}</div>` : ''}
       <div style="margin-bottom:10px;">${playersHtml}</div>
+      
+      <div class="card-actions">
+         <button class="card-btn" onclick="openDetail('${data.word}')"><i class="fas fa-book-open"></i> 詳細</button>
+         <button class="card-btn delete" onclick="deleteCard('${docId}', '${data.word}')"><i class="fas fa-trash"></i> 削除</button>
+      </div>
+      
       <div class="card-footer">Recorded: ${dateStr}</div>
     `;
     container.appendChild(card);
 }
 
-// 知識の収集ボタン (Knowledge Capture)
+// ★追加: カード削除機能
+window.deleteCard = async function(docId, word) {
+    if(!confirm(`"${word}" を削除してもよろしいですか？`)) return;
+    try {
+        await deleteDoc(doc(firestore, "knowledge_base", docId));
+        logToConsole(`Deleted knowledge: ${word}`, "system");
+        // Snapshotリスナーが自動でDOMとグラフを更新します
+    } catch(e) {
+        logToConsole("Delete Error: " + e.message, "error");
+    }
+}
+
+// ★追加: 詳細モーダル表示機能
+window.openDetail = async function(word) {
+    const modal = document.getElementById('detail-modal');
+    const body = document.getElementById('detail-body');
+    const title = document.getElementById('detail-title');
+    
+    title.innerText = `Analyzing: ${word}`;
+    body.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Generating deep report...';
+    modal.style.display = 'flex';
+
+    try {
+        const text = await getDetailedSummary(word);
+        body.innerHTML = text.replace(/\n/g, '<br>'); // 改行反映
+    } catch(e) {
+        body.innerText = "Error fetching details.";
+    }
+}
+window.closeDetailModal = function() {
+    document.getElementById('detail-modal').style.display = 'none';
+}
+
+// ★追加: パネル表示機能（「周辺単語を調べる」ボタン付き）
+function showPanel(node) {
+    const panelTitle = document.getElementById('panel-title');
+    const panelDesc = document.getElementById('panel-desc');
+    const panelControls = document.querySelector('#info-panel .controls');
+
+    if(!panelTitle) return;
+
+    panelTitle.innerText = node.label;
+    panelDesc.innerText = node.title || "No data.";
+    document.getElementById('info-panel').classList.add('active');
+
+    // コントロールボタンの生成
+    // 既存の「Knowledge」ノード以外なら「調査する」ボタンを表示
+    let html = `<button class="action-btn" onclick="closePanel()">Close</button>`;
+    
+    // まだメイン知識になっていないノード（playerなど）の場合
+    if(node.group !== 'knowledge') {
+        html = `
+        <button class="action-btn" style="background:var(--accent-cyan); color:black;" onclick="investigateNode('${node.label}')">
+           <i class="fas fa-search-plus"></i> この単語を調査
+        </button>
+        ` + html;
+    }
+    
+    panelControls.innerHTML = html;
+}
+
+// ★追加: グラフ上の単語を調査して保存する
+window.investigateNode = function(word) {
+    // 検索窓に値を入れてボタンを押すのと同じ処理
+    document.getElementById('wordInput').value = word;
+    document.getElementById('searchBtn').click();
+    closePanel();
+}
+
+// ★追加: メモ機能関連
+window.addMemo = async function() {
+    const input = document.getElementById('memoInput');
+    const text = input.value.trim();
+    if(!text || !firestore) return;
+    
+    try {
+        await addDoc(collection(firestore, "memos"), {
+            text: text,
+            timestamp: serverTimestamp()
+        });
+        input.value = "";
+    } catch(e) { console.error(e); }
+}
+// メモから調査開始
+window.analyzeFromMemo = function(text, docId) {
+    document.getElementById('wordInput').value = text;
+    document.getElementById('searchBtn').click();
+    // 調査したらメモから消す
+    deleteMemo(docId);
+}
+window.deleteMemo = async function(docId) {
+    try {
+        await deleteDoc(doc(firestore, "memos", docId));
+    } catch(e) { console.error(e); }
+}
+// メモボタンイベント
+const addMemoBtn = document.getElementById('addMemoBtn');
+if(addMemoBtn) addMemoBtn.addEventListener('click', window.addMemo);
+
+
+// --- 知識の収集ボタン (Main Search) ---
 const captureBtn = document.getElementById('searchBtn');
 if (captureBtn) {
     captureBtn.addEventListener('click', async () => {
@@ -234,7 +404,6 @@ if (captureBtn) {
 
         try {
             const aiResult = await analyzeAndSave(word);
-            
             await addDoc(collection(firestore, "knowledge_base"), {
                 ...aiResult,
                 timestamp: serverTimestamp()
@@ -250,33 +419,24 @@ if (captureBtn) {
             statusMessage.textContent = "Error!";
         } finally {
             captureBtn.disabled = false;
-            captureBtn.innerHTML = 'EXPLORE'; // ボタンの文言を合わせました
+            captureBtn.innerHTML = 'EXPLORE';
             setTimeout(() => { statusMessage.textContent = ""; }, 3000);
         }
     });
 }
 
-// --- 5. Chat Assistant Logic (Context-Aware RAG) ---
-
+// --- 5. Chat Assistant Logic (RAG) ---
 async function getRecentContext() {
     if (!nodes) return "";
-
-    // nodesがまだDataSetとして機能していない場合は空を返す
     try {
         if (nodes.length === 0 && typeof nodes.get !== 'function') return "";
     } catch(e) { return ""; }
 
-    // Vis.jsのnodesデータセットから、保存済みの知識（summary）を抽出
     const contextData = nodes.get({
-        filter: function (item) {
-            return item.group === 'knowledge'; // メインの知識ノードのみ
-        }
+        filter: function (item) { return item.group === 'knowledge'; }
     });
-
     if (contextData.length === 0) return "";
 
-    // 最新順（簡易的に配列の最後から取得）
-    // テキストに整形
     const contextText = contextData.slice(-15).reverse().map(item => {
         return `- 【${item.label}】: ${item.title || "概要なし"}`;
     }).join("\n");
@@ -284,42 +444,35 @@ async function getRecentContext() {
     return contextText;
 }
 
-// メッセージ表示ヘルパー
 function appendMessage(text, type) {
     const history = document.getElementById('chat-history');
     if (!history) return;
-
     const div = document.createElement('div');
     div.className = `chat-msg ${type}`;
     div.innerHTML = text.replace(/\n/g, '<br>');
-    
     history.appendChild(div);
     history.scrollTop = history.scrollHeight;
 }
 
-// ログ出力をチャットシステムに統合
 window.logToConsole = function(text, type = "system") {
     const msgType = (type === 'ai' || type === 'error') ? 'system' : type;
     appendMessage(`>> ${text}`, msgType);
 }
 
-// コンテキストを考慮したチャット送信処理
 window.sendChat = async function() {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
     if (!text) return;
 
-    // 1. ユーザーのメッセージを表示
     appendMessage(text, 'user');
     input.value = '';
 
     const apiKey = (CONFIG.openai || "").trim();
     if (!apiKey) {
-        appendMessage("Error: API Key is missing in Settings.", "system");
+        appendMessage("Error: API Key is missing.", "system");
         return;
     }
 
-    // 2. ローディング表示
     const loadingId = 'loading-' + Date.now();
     const history = document.getElementById('chat-history');
     const loadingDiv = document.createElement('div');
@@ -330,26 +483,17 @@ window.sendChat = async function() {
     history.scrollTop = history.scrollHeight;
 
     try {
-        // ★ 過去の知識を取得
         const context = await getRecentContext();
         
-        console.log("Injecting Context:", context); // デバッグ用
-
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-        
-        // ★ プロンプト
         const prompt = `
         You are "Orbit Assistant", an expert IT consultant.
-        
         The user has recently researched the following topics (Most recent first):
         === RECENT SEARCH HISTORY ===
         ${context || "No search history available yet."}
         =============================
-
         [INSTRUCTION]:
         Answer the user's question in Japanese based on the history above if applicable.
-        If the user asks "what did I look up?" or "tell me about the last one", refer to the list above.
-        
         [USER QUESTION]:
         ${text}
         `;
@@ -359,23 +503,18 @@ window.sendChat = async function() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
         });
-
         const json = await res.json();
         const aiResponse = json.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't process that.";
 
-        const loader = document.getElementById(loadingId);
-        if(loader) loader.remove();
+        document.getElementById(loadingId).remove();
         appendMessage(aiResponse, 'ai');
-
     } catch (e) {
-        const loader = document.getElementById(loadingId);
-        if(loader) loader.remove();
+        document.getElementById(loadingId).remove();
         appendMessage("Error: " + e.message, "system");
     }
 }
 
-// --- 6. Helper & Event Listeners ---
-
+// --- 6. Helpers & Event Listeners ---
 window.toggleSettings = function() {
     const modal = document.getElementById('settings-modal');
     modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
@@ -386,52 +525,44 @@ window.toggleSettings = function() {
         document.getElementById('firebase-config').value = JSON.stringify(CONFIG.firebase, null, 2);
     }
 }
-
 window.saveSettings = function() {
     CONFIG.openai = document.getElementById('openai-key').value.trim();
     CONFIG.googleKey = document.getElementById('google-key').value.trim();
     CONFIG.googleCx = document.getElementById('google-cx').value.trim();
     try { const fbValue = document.getElementById('firebase-config').value.trim(); CONFIG.firebase = fbValue ? JSON.parse(fbValue) : {}; } 
     catch(e) { alert("Invalid JSON"); return; }
-    
     localStorage.setItem('openai_key', CONFIG.openai);
     localStorage.setItem('google_key', CONFIG.googleKey);
     localStorage.setItem('google_cx', CONFIG.googleCx);
     localStorage.setItem('firebase_config', JSON.stringify(CONFIG.firebase));
-    
     toggleSettings();
     location.reload();
 }
-
-// Helper: パネル操作
 window.closePanel = function() { 
     const p = document.getElementById('info-panel');
     if(p) p.classList.remove('active'); 
     if(network) network.unselectAll(); 
 }
 
-// Helper: ノード削除
-window.deleteNode = function() {
-    // 簡易実装: DB削除は未実装のため、画面から消してパネルを閉じるのみ
-    window.closePanel();
-}
-
-// スタートアップ実行
+// Initialize
 initGraph();
 initFirebase();
 
-// Enterキーでの送信サポート (検索窓)
 const searchInputField = document.getElementById('wordInput');
 if(searchInputField) {
     searchInputField.addEventListener('keypress', (e) => {
         if(e.key === 'Enter') document.getElementById('searchBtn').click();
     });
 }
-
-// Enterキーでの送信サポート (チャット窓)
 const chatInputField = document.getElementById('chatInput');
 if(chatInputField) {
     chatInputField.addEventListener('keypress', (e) => {
         if(e.key === 'Enter') window.sendChat();
+    });
+}
+const memoInputField = document.getElementById('memoInput');
+if(memoInputField) {
+    memoInputField.addEventListener('keypress', (e) => {
+        if(e.key === 'Enter') window.addMemo();
     });
 }
