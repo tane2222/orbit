@@ -258,20 +258,11 @@ if (captureBtn) {
 
 // --- 5. Chat Assistant Logic (Context-Aware RAG) ---
 
-// ★追加: Firestoreから過去の知識を取得してテキスト化する関数
+// --- 5. Chat Assistant Logic (修正版) ---
+
+// ★追加: Firestoreから過去の知識を取得してテキスト化する関数（変更なし）
 async function getRecentContext() {
-    if (!firestore) return "";
-    
-    // 最新の20件を取得（トークン過多を防ぐため制限）
-    // 本格化するならここでベクトル検索を使いますが、まずは「直近の学習内容」を参照させます
-    const q = query(collection(firestore, "knowledge_base"), orderBy("timestamp", "desc"));
-    
-    // 一度取得（リアルタイムリスナーではなく、都度取得）
-    // onSnapshotではなくgetDocsを使いたいところですが、
-    // インポートを増やさないため、簡易的に既存のnodesデータやcardContainerのデータを利用もできますが、
-    // ここでは正確を期して、既存のリスナーで同期されている `nodes` データセットを活用します。
-    
-    if (!nodes || nodes.length === 0) return "No knowledge stored yet.";
+    if (!nodes || nodes.length === 0) return "";
 
     // Vis.jsのnodesデータセットから、保存済みの知識（summary）を抽出
     const contextData = nodes.get({
@@ -280,16 +271,18 @@ async function getRecentContext() {
         }
     });
 
+    if (contextData.length === 0) return "";
+
+    // 最新順（ID順やタイムスタンプ順ではない場合があるので、本来はソート推奨だが簡易的にそのまま）
     // テキストに整形
-    // 例: "- アジャイル開発: 短いサイクルで... (関連: スクラム)"
-    const contextText = contextData.slice(0, 20).map(item => {
+    const contextText = contextData.slice(0, 15).map(item => {
         return `- 【${item.label}】: ${item.title || "概要なし"}`;
     }).join("\n");
 
     return contextText;
 }
 
-// メッセージ表示ヘルパー
+// メッセージ表示ヘルパー（変更なし）
 function appendMessage(text, type) {
     const history = document.getElementById('chat-history');
     if (!history) return;
@@ -302,7 +295,7 @@ function appendMessage(text, type) {
     history.scrollTop = history.scrollHeight;
 }
 
-// ログ出力をチャットシステムに統合
+// ログ出力をチャットシステムに統合（変更なし）
 window.logToConsole = function(text, type = "system") {
     const msgType = (type === 'ai' || type === 'error') ? 'system' : type;
     appendMessage(`>> ${text}`, msgType);
@@ -335,23 +328,27 @@ window.sendChat = async function() {
     history.scrollTop = history.scrollHeight;
 
     try {
-        // ★ ここで過去の知識を取得
+        // ★ 過去の知識を取得
         const context = await getRecentContext();
+        
+        // デバッグ用: コンソールでデータが取れているか確認（F12キーで見れます）
+        console.log("Injecting Context:", context);
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         
-        // ★ プロンプトに「ユーザーの知識ベース」を注入
+        // ★ プロンプト修正: AIに「これが直近の履歴だ」と強く認識させる
         const prompt = `
-        You are "Orbit Assistant", an expert IT consultant utilizing the user's personal knowledge base.
+        You are "Orbit Assistant", an expert IT consultant.
         
-        [USER'S KNOWLEDGE BASE (PREVIOUSLY LEARNED TERMS)]:
-        ${context}
+        The user has recently researched the following topics (Most recent first):
+        === RECENT SEARCH HISTORY ===
+        ${context || "No search history available yet."}
+        =============================
 
         [INSTRUCTION]:
-        Answer the user's question in Japanese.
-        IMPORTANT: If the user's question relates to any term in the KNOWLEDGE BASE above, explicitly mention the connection (e.g., "以前学習した〇〇と似ていますが...").
-        If the answer is not in the knowledge base, answer using your general knowledge but suggest related topics from the base if possible.
-
+        Answer the user's question in Japanese based on the history above if applicable.
+        If the user asks "what did I look up?" or "tell me about the last one", refer to the list above.
+        
         [USER QUESTION]:
         ${text}
         `;
