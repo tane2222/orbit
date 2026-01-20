@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Orbit - AI Knowledge Explorer</title>
     <link rel="icon" href="img/orbit-atom.png" type="image/png">
+    <link rel="apple-touch-icon" href="img/orbit-atom.png">
+
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -22,22 +24,22 @@
         <div class="brand-text">ORBIT<span>.ai</span></div>
     </div>
 
- <section class="search-section">
-  <div class="input-container">
-    <input type="text" id="wordInput" placeholder="知りたい単語を入力（例: アジャイル開発）">
-    <button id="searchBtn">
-       解析・保存
-    </button>
-  </div>
-  <p id="statusMessage" class="status-msg"></p>
-</section>
+    <section class="search-section">
+        <div class="input-container">
+            <input type="text" id="wordInput" placeholder="知識をインストール (例: クラウドコンピューティング)">
+            <button id="searchBtn">
+               <i class="fas fa-download"></i> 解析・保存
+            </button>
+        </div>
+        <p id="statusMessage" class="status-msg"></p>
+    </section>
 
-<section id="cardContainer" class="card-grid">
-  </section>
+    <section id="cardContainer" class="card-grid">
+        </section>
 
     <div class="top-bar">
         <i class="fas fa-search" style="color: var(--accent-cyan); align-self: center;"></i>
-        <input type="text" id="search-input" placeholder="探求したい知識の恒星名を入力...">
+        <input type="text" id="search-input" placeholder="Google Search (Web全体を検索)...">
         <button class="action-btn" id="search-btn">EXPLORE</button>
     </div>
 
@@ -53,19 +55,25 @@
 
     <div class="agent-console">
         <div class="console-header">
-            <span><i class="fas fa-satellite-dish"></i> ORBIT AGENT LOG</span>
-            <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog fa-spin" style="animation-duration: 3s;"></i> Config</div>
+            <span><i class="fas fa-robot"></i> ORBIT ASSISTANT</span>
+            <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog"></i> Config</div>
         </div>
-        <div class="console-body" id="console-logs">
-            <div class="log-entry system">>> Orbit system initialized.</div>
-            <div class="log-entry system">>> Standing by for query...</div>
+        
+        <div class="console-body" id="chat-history">
+            <div class="chat-msg system">>> ORBIT System Online.</div>
+            <div class="chat-msg ai">こんにちは。あなたのナレッジ・ベースと連携しています。業界知識について何でも聞いてください。</div>
+        </div>
+    
+        <div class="console-input-area">
+            <input type="text" id="chatInput" placeholder="AIに質問... (例: AWSとAzureの違いは？)">
+            <button onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
         </div>
     </div>
 
     <div id="settings-modal">
         <div class="modal-content">
             <h3><i class="fas fa-sliders-h"></i> System Configuration</h3>
-            <p style="font-size: 0.8rem; color: #aaa;">Keys are stored locally in your browser orbit.</p>
+            <p style="font-size: 0.8rem; color: #aaa;">Keys are stored locally in your browser.</p>
             
             <label>AI API Key (Gemini)</label>
             <input type="password" id="openai-key" placeholder="AIza... (Gemini API Key)" onchange="this.value = this.value.trim()">
