@@ -1,13 +1,15 @@
 // --- Imports ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
-// ★ deleteDoc, doc を追加
 import { getFirestore, collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 // --- Global Variables ---
 let network, nodes, edges;
 let firestore;
 let auth;
+// ★追加: 検索直後にフォーカスしたいノードIDを一時保存する変数
+let pendingFocusId = null;
+
 let CONFIG = {
     openai: localStorage.getItem('openai_key') || '', 
     googleKey: localStorage.getItem('google_key') || '',
@@ -25,64 +27,111 @@ function initGraph() {
 
     const data = { nodes: nodes, edges: edges };
     
+    // ★修正: 宇宙っぽさと、緩やかな動きを実現する設定
     const options = {
         nodes: {
             shape: 'dot',
-            font: { size: 14, color: '#ffffff', face: 'Segoe UI' },
-            borderWidth: 2,
-            shadow: { enabled: true, color: 'rgba(102, 252, 241, 0.5)', size: 10 }
+            font: { 
+                size: 14, 
+                color: '#ffffff', 
+                face: 'Orbitron, sans-serif', // フォントを宇宙風に
+                strokeWidth: 0, 
+                strokeColor: '#ffffff'
+            },
+            borderWidth: 0,
+            shadow: { 
+                enabled: true, 
+                color: 'rgba(102, 252, 241, 0.6)', 
+                size: 20, 
+                x: 0, y: 0 
+            }
         },
         edges: {
             width: 1,
-            color: { color: 'rgba(102, 252, 241, 0.2)', highlight: '#66fcf1' },
-            smooth: { type: 'continuous' }
+            color: { 
+                color: 'rgba(102, 252, 241, 0.15)', // 薄くして軌道っぽく
+                highlight: '#66fcf1',
+                hover: '#66fcf1'
+            },
+            smooth: { 
+                type: 'continuous',
+                roundness: 0.5
+            },
+            // 長さを自動調整させない（物理演算に任せる）
+            dashes: false 
         },
         groups: {
+            // 恒星（メイン知識）: 大きく、オレンジ/ゴールドに輝く
             knowledge: {
-                size: 30,
-                color: { background: '#0b1c2c', border: '#66fcf1' },
-                font: { size: 18, color: '#66fcf1' }
+                size: 45,
+                color: { 
+                    background: '#ff9900', 
+                    border: '#ffd700',
+                    highlight: { background: '#ffcc00', border: '#ffffff' }
+                },
+                font: { size: 18, color: '#ffd700', vadjust: -50 }, // ラベルを少し離す
+                shadow: { color: 'rgba(255, 165, 0, 0.8)', size: 50 } // 強い発光
             },
+            // 惑星（関連語・プレイヤー）: 小さく、青白く
             player: {
-                size: 15,
-                color: { background: '#1f2833', border: '#45a29e' },
-                font: { size: 12, color: '#c5c6c7' },
-                shape: 'diamond'
+                size: 12,
+                color: { 
+                    background: '#00d2ff', 
+                    border: '#ffffff',
+                    highlight: { background: '#66fcf1', border: '#ffffff' }
+                },
+                font: { size: 10, color: '#aaddff', vadjust: -25 },
+                shadow: { color: 'rgba(0, 210, 255, 0.6)', size: 15 }
             },
             related: {
-                size: 10,
-                color: { background: '#333', border: '#888' },
+                size: 8,
+                color: { background: '#555555', border: '#888888' },
                 font: { size: 10, color: '#888' }
             }
         },
         physics: {
-            stabilization: false,
-            barnesHut: {
-                gravitationalConstant: -20000,
-                centralGravity: 0.1,
-                springLength: 120,
-                springConstant: 0.04,
-                damping: 0.09
+            // ★重要: 動きを緩やかにする設定
+            enabled: true,
+            solver: 'forceAtlas2Based', // 宇宙のような自然な広がりを作る計算モデル
+            forceAtlas2Based: {
+                gravitationalConstant: -100, // 反発力（マイナスが大きいほど離れるが、弱めて密集を防ぐ）
+                centralGravity: 0.005,      // 中心に引き寄せる力（弱くして広がりを持たせる）
+                springLength: 150,          // バネの長さ（軌道半径）
+                springConstant: 0.05,       // バネの強さ
+                damping: 0.8                // 減衰率（1に近いほど空気抵抗が強く、ヌルっと動く）
+            },
+            maxVelocity: 30, // 移動速度の上限（爆発防止）
+            minVelocity: 0.1, // 停止する閾値
+            stabilization: {
+                enabled: true,
+                iterations: 200, // 初期描画時にある程度計算してから表示
+                updateInterval: 25
             }
         },
-        interaction: { hover: true, tooltipDelay: 200 }
+        interaction: { 
+            hover: true, 
+            tooltipDelay: 200,
+            zoomView: true,
+            dragView: true 
+        }
     };
 
     network = new vis.Network(container, data, options);
 
+    // クリック時のイベント
     network.on("click", function (params) {
         if (params.nodes.length > 0) {
             network.focus(params.nodes[0], {
                 scale: 1.2,
-                animation: { duration: 800, easingFunction: 'easeInOutQuad' }
+                animation: { duration: 1000, easingFunction: 'easeInOutQuad' }
             });
             
-            // ★追加: グラフ上のノードをクリックした時の処理
             const nodeId = params.nodes[0];
             const node = nodes.get(nodeId);
-            if(node) {
-                showPanel(node); // 詳細パネルを表示
-            }
+            if(node) showPanel(node);
+        } else {
+            // 何もないところをクリックしたらパネルを閉じる
+            closePanel();
         }
     });
 }
@@ -100,7 +149,7 @@ function initFirebase() {
         signInAnonymously(auth)
             .then(() => {
                 syncKnowledgeBase();
-                syncMemos(); // ★追加: メモの同期
+                syncMemos();
             })
             .catch((error) => { logToConsole("Auth Failed: " + error.message, "error"); });
     } catch (e) { logToConsole("Init Error: " + e.message, "error"); }
@@ -115,55 +164,89 @@ function syncKnowledgeBase() {
     onSnapshot(q, (snapshot) => {
         if(cardContainer) cardContainer.innerHTML = "";
         
-        // 差分更新ではなく全クリア再描画（シンプルさ優先）
-        // ※削除された場合も自動で消えるように nodes.clear() します
-        nodes.clear();
-        edges.clear();
+        // 既存のノードIDリストを取得（差分チェック用）
+        const existingIds = nodes.getIds();
+        
+        // 今回のSnapshotにあるIDリスト
+        const newIds = [];
 
         snapshot.forEach((docSnap) => {
             const data = docSnap.data();
             const docId = docSnap.id;
+            newIds.push(docId);
 
-            // A. サイドバーにカードを追加（IDを渡す）
+            // A. サイドバー用カード
             if(cardContainer) createCardElement(data, docId, cardContainer);
 
-            // B. グラフにノードを追加
-            try {
-                nodes.add({
-                    id: docId,
-                    label: data.word,
-                    group: 'knowledge',
-                    title: data.summary
-                });
-
-                if (data.key_players && Array.isArray(data.key_players)) {
-                    data.key_players.forEach((player, index) => {
-                        const playerId = `${docId}_p_${index}`;
-                        const playerName = player.name || player;
-                        
-                        nodes.add({
-                            id: playerId,
-                            label: playerName,
-                            group: 'player',
-                            title: player.role || 'Key Player'
-                        });
-                        
-                        edges.add({
-                            from: docId,
-                            to: playerId
-                        });
+            // B. グラフ用ノード
+            // 既に存在する場合は更新せずスキップ（再描画によるチラつき防止）
+            // ただし、位置情報がない新規ノードは追加する
+            if (!existingIds.includes(docId)) {
+                try {
+                    // ★工夫: 新規ノードは画面中央(0,0)付近に初期配置する
+                    // これにより「遠くから飛んでくる」現象を防ぐ
+                    nodes.add({
+                        id: docId,
+                        label: data.word,
+                        group: 'knowledge',
+                        title: data.summary,
+                        x: (Math.random() - 0.5) * 50, // 中心付近にランダム配置
+                        y: (Math.random() - 0.5) * 50
                     });
+
+                    if (data.key_players && Array.isArray(data.key_players)) {
+                        data.key_players.forEach((player, index) => {
+                            const playerId = `${docId}_p_${index}`;
+                            const playerName = player.name || player;
+                            newIds.push(playerId); // 子ノードも追跡
+
+                            nodes.add({
+                                id: playerId,
+                                label: playerName,
+                                group: 'player',
+                                title: player.role || 'Key Player',
+                                x: (Math.random() - 0.5) * 50,
+                                y: (Math.random() - 0.5) * 50
+                            });
+                            
+                            edges.add({
+                                from: docId,
+                                to: playerId
+                            });
+                        });
+                    }
+                } catch (e) {
+                    console.log("Node add skip");
                 }
-            } catch (e) {
-                // 重複などでエラーが出ても無視
             }
         });
         
-        logToConsole(`Synced ${snapshot.size} knowledge clusters.`, "system");
+        // 削除されたノードをグラフから消す
+        const idsToRemove = existingIds.filter(id => !newIds.includes(id));
+        if(idsToRemove.length > 0) {
+            nodes.remove(idsToRemove);
+        }
+
+        logToConsole(`Visualizing ${snapshot.size} knowledge clusters.`, "system");
+
+        // ★追加: 検索直後の自動フォーカス
+        if (pendingFocusId && nodes.get(pendingFocusId)) {
+            // 少し遅延させてから移動（ノードの物理演算が落ち着き始めた頃に）
+            setTimeout(() => {
+                network.focus(pendingFocusId, {
+                    scale: 1.5, // ズームイン
+                    offset: {x: 0, y: 0},
+                    animation: {
+                        duration: 1500, // ゆっくり移動
+                        easingFunction: 'easeInOutCubic'
+                    }
+                });
+                pendingFocusId = null; // リセット
+            }, 500);
+        }
     });
 }
 
-// ★追加: メモ機能の同期
 function syncMemos() {
     const memoContainer = document.getElementById('memoContainer');
     if (!firestore || !memoContainer) return;
@@ -188,7 +271,7 @@ function syncMemos() {
     });
 }
 
-// --- 3. AI Logic (Capture Analysis) ---
+// --- 3. AI Logic ---
 async function analyzeAndSave(word) {
     const apiKey = (CONFIG.openai || "").trim();
     if (!apiKey) throw new Error("API Key is missing.");
@@ -223,7 +306,6 @@ async function analyzeAndSave(word) {
     return JSON.parse(rawText);
 }
 
-// ★追加: もっと詳しく要約する機能 (Detail)
 async function getDetailedSummary(word) {
     const apiKey = (CONFIG.openai || "").trim();
     if (!apiKey) return "API Key missing.";
@@ -232,10 +314,10 @@ async function getDetailedSummary(word) {
     Explain the term "${word}" in detail for an IT professional.
     Structure:
     1. Detailed Definition
-    2. Historical Background or Context
+    2. Historical Background
     3. Pros & Cons
-    4. Main Use Cases
-    Respond in Japanese. Output plain text (Markdown allowed).
+    4. Use Cases
+    Respond in Japanese. Output plain text.
     `;
     
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -248,12 +330,20 @@ async function getDetailedSummary(word) {
     return json.candidates?.[0]?.content?.parts?.[0]?.text || "No details found.";
 }
 
-// --- 4. DOM Elements & UI Functions ---
+// --- 4. DOM Elements ---
 
-// ★修正: IDを受け取り、削除ボタンと詳細ボタンを追加
 function createCardElement(data, docId, container) {
     const card = document.createElement('div');
     card.className = 'knowledge-card';
+    // クリックでグラフ上のそのノードへ飛ぶ機能を追加
+    card.onclick = (e) => {
+        // ボタンクリック時は発動しないように制御
+        if(e.target.tagName === 'BUTTON' || e.target.tagName === 'I') return;
+        network.focus(docId, { scale: 1.2, animation: { duration: 1000 } });
+        showPanel({ label: data.word, title: data.summary, group: 'knowledge' });
+    };
+    card.style.cursor = "pointer";
+
     const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : 'Just now';
 
     let playersHtml = '';
@@ -263,7 +353,6 @@ function createCardElement(data, docId, container) {
         ).join('');
     }
 
-    // カードHTML構築
     card.innerHTML = `
       <div class="card-header">
         <h3 class="card-title">${data.word}</h3>
@@ -272,118 +361,85 @@ function createCardElement(data, docId, container) {
       <div class="card-summary">${data.summary}</div>
       ${data.analogy ? `<div style="font-size:0.8rem; color:#888; margin-bottom:10px; padding:8px; background:rgba(0,0,0,0.2); border-radius:5px;"><i class="fas fa-lightbulb" style="color:#ffd700;"></i> ${data.analogy}</div>` : ''}
       <div style="margin-bottom:10px;">${playersHtml}</div>
-      
       <div class="card-actions">
          <button class="card-btn" onclick="openDetail('${data.word}')"><i class="fas fa-book-open"></i> 詳細</button>
          <button class="card-btn delete" onclick="deleteCard('${docId}', '${data.word}')"><i class="fas fa-trash"></i> 削除</button>
       </div>
-      
       <div class="card-footer">Recorded: ${dateStr}</div>
     `;
     container.appendChild(card);
 }
 
-// ★追加: カード削除機能
 window.deleteCard = async function(docId, word) {
-    if(!confirm(`"${word}" を削除してもよろしいですか？`)) return;
+    if(!confirm(`"${word}" を削除しますか？`)) return;
     try {
         await deleteDoc(doc(firestore, "knowledge_base", docId));
-        logToConsole(`Deleted knowledge: ${word}`, "system");
-        // Snapshotリスナーが自動でDOMとグラフを更新します
+        logToConsole(`Deleted: ${word}`, "system");
     } catch(e) {
         logToConsole("Delete Error: " + e.message, "error");
     }
 }
 
-// ★追加: 詳細モーダル表示機能
 window.openDetail = async function(word) {
     const modal = document.getElementById('detail-modal');
     const body = document.getElementById('detail-body');
     const title = document.getElementById('detail-title');
-    
     title.innerText = `Analyzing: ${word}`;
-    body.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Generating deep report...';
+    body.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Generating report...';
     modal.style.display = 'flex';
-
     try {
         const text = await getDetailedSummary(word);
-        body.innerHTML = text.replace(/\n/g, '<br>'); // 改行反映
-    } catch(e) {
-        body.innerText = "Error fetching details.";
-    }
+        body.innerHTML = text.replace(/\n/g, '<br>');
+    } catch(e) { body.innerText = "Error fetching details."; }
 }
 window.closeDetailModal = function() {
     document.getElementById('detail-modal').style.display = 'none';
 }
 
-// ★追加: パネル表示機能（「周辺単語を調べる」ボタン付き）
 function showPanel(node) {
     const panelTitle = document.getElementById('panel-title');
     const panelDesc = document.getElementById('panel-desc');
     const panelControls = document.querySelector('#info-panel .controls');
 
     if(!panelTitle) return;
-
     panelTitle.innerText = node.label;
     panelDesc.innerText = node.title || "No data.";
     document.getElementById('info-panel').classList.add('active');
 
-    // コントロールボタンの生成
-    // 既存の「Knowledge」ノード以外なら「調査する」ボタンを表示
     let html = `<button class="action-btn" onclick="closePanel()">Close</button>`;
-    
-    // まだメイン知識になっていないノード（playerなど）の場合
     if(node.group !== 'knowledge') {
-        html = `
-        <button class="action-btn" style="background:var(--accent-cyan); color:black;" onclick="investigateNode('${node.label}')">
-           <i class="fas fa-search-plus"></i> この単語を調査
-        </button>
-        ` + html;
+        html = `<button class="action-btn" style="background:var(--accent-cyan); color:black;" onclick="investigateNode('${node.label}')"><i class="fas fa-search-plus"></i> 調査</button>` + html;
     }
-    
     panelControls.innerHTML = html;
 }
 
-// ★追加: グラフ上の単語を調査して保存する
 window.investigateNode = function(word) {
-    // 検索窓に値を入れてボタンを押すのと同じ処理
     document.getElementById('wordInput').value = word;
     document.getElementById('searchBtn').click();
     closePanel();
 }
 
-// ★追加: メモ機能関連
 window.addMemo = async function() {
     const input = document.getElementById('memoInput');
     const text = input.value.trim();
     if(!text || !firestore) return;
-    
     try {
-        await addDoc(collection(firestore, "memos"), {
-            text: text,
-            timestamp: serverTimestamp()
-        });
+        await addDoc(collection(firestore, "memos"), { text: text, timestamp: serverTimestamp() });
         input.value = "";
     } catch(e) { console.error(e); }
 }
-// メモから調査開始
 window.analyzeFromMemo = function(text, docId) {
     document.getElementById('wordInput').value = text;
     document.getElementById('searchBtn').click();
-    // 調査したらメモから消す
     deleteMemo(docId);
 }
 window.deleteMemo = async function(docId) {
-    try {
-        await deleteDoc(doc(firestore, "memos", docId));
-    } catch(e) { console.error(e); }
+    try { await deleteDoc(doc(firestore, "memos", docId)); } catch(e) { console.error(e); }
 }
-// メモボタンイベント
 const addMemoBtn = document.getElementById('addMemoBtn');
 if(addMemoBtn) addMemoBtn.addEventListener('click', window.addMemo);
 
-
-// --- 知識の収集ボタン (Main Search) ---
+// --- Main Search Event ---
 const captureBtn = document.getElementById('searchBtn');
 if (captureBtn) {
     captureBtn.addEventListener('click', async () => {
@@ -404,10 +460,15 @@ if (captureBtn) {
 
         try {
             const aiResult = await analyzeAndSave(word);
-            await addDoc(collection(firestore, "knowledge_base"), {
+            
+            // 保存し、そのIDを取得
+            const docRef = await addDoc(collection(firestore, "knowledge_base"), {
                 ...aiResult,
                 timestamp: serverTimestamp()
             });
+
+            // ★追加: 描画更新後にフォーカスするためのIDをセット
+            pendingFocusId = docRef.id;
 
             wordInput.value = "";
             statusMessage.textContent = "Data Secured.";
@@ -425,23 +486,13 @@ if (captureBtn) {
     });
 }
 
-// --- 5. Chat Assistant Logic (RAG) ---
+// --- Chat & Context ---
 async function getRecentContext() {
     if (!nodes) return "";
-    try {
-        if (nodes.length === 0 && typeof nodes.get !== 'function') return "";
-    } catch(e) { return ""; }
-
-    const contextData = nodes.get({
-        filter: function (item) { return item.group === 'knowledge'; }
-    });
+    try { if (nodes.length === 0 && typeof nodes.get !== 'function') return ""; } catch(e) { return ""; }
+    const contextData = nodes.get({ filter: function (item) { return item.group === 'knowledge'; } });
     if (contextData.length === 0) return "";
-
-    const contextText = contextData.slice(-15).reverse().map(item => {
-        return `- 【${item.label}】: ${item.title || "概要なし"}`;
-    }).join("\n");
-
-    return contextText;
+    return contextData.slice(-15).reverse().map(item => `- 【${item.label}】: ${item.title || "概要なし"}`).join("\n");
 }
 
 function appendMessage(text, type) {
@@ -463,7 +514,6 @@ window.sendChat = async function() {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
     if (!text) return;
-
     appendMessage(text, 'user');
     input.value = '';
 
@@ -484,7 +534,6 @@ window.sendChat = async function() {
 
     try {
         const context = await getRecentContext();
-        
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
         const prompt = `
         You are "Orbit Assistant", an expert IT consultant.
@@ -497,7 +546,6 @@ window.sendChat = async function() {
         [USER QUESTION]:
         ${text}
         `;
-
         const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -505,7 +553,6 @@ window.sendChat = async function() {
         });
         const json = await res.json();
         const aiResponse = json.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't process that.";
-
         document.getElementById(loadingId).remove();
         appendMessage(aiResponse, 'ai');
     } catch (e) {
@@ -514,7 +561,7 @@ window.sendChat = async function() {
     }
 }
 
-// --- 6. Helpers & Event Listeners ---
+// --- Helpers ---
 window.toggleSettings = function() {
     const modal = document.getElementById('settings-modal');
     modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
@@ -543,26 +590,14 @@ window.closePanel = function() {
     if(p) p.classList.remove('active'); 
     if(network) network.unselectAll(); 
 }
+window.deleteNode = function() { window.closePanel(); }
 
-// Initialize
 initGraph();
 initFirebase();
 
 const searchInputField = document.getElementById('wordInput');
-if(searchInputField) {
-    searchInputField.addEventListener('keypress', (e) => {
-        if(e.key === 'Enter') document.getElementById('searchBtn').click();
-    });
-}
+if(searchInputField) searchInputField.addEventListener('keypress', (e) => { if(e.key === 'Enter') document.getElementById('searchBtn').click(); });
 const chatInputField = document.getElementById('chatInput');
-if(chatInputField) {
-    chatInputField.addEventListener('keypress', (e) => {
-        if(e.key === 'Enter') window.sendChat();
-    });
-}
+if(chatInputField) chatInputField.addEventListener('keypress', (e) => { if(e.key === 'Enter') window.sendChat(); });
 const memoInputField = document.getElementById('memoInput');
-if(memoInputField) {
-    memoInputField.addEventListener('keypress', (e) => {
-        if(e.key === 'Enter') window.addMemo();
-    });
-}
+if(memoInputField) memoInputField.addEventListener('keypress', (e) => { if(e.key === 'Enter') window.addMemo(); });
