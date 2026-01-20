@@ -6,13 +6,9 @@
     <title>Orbit - AI Knowledge Explorer</title>
     <link rel="icon" href="img/orbit-atom.png" type="image/png">
     <link rel="apple-touch-icon" href="img/orbit-atom.png">
-
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-    
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
-    
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -25,25 +21,34 @@
     </div>
 
     <section class="search-section">
-    <div class="input-container">
-        <i class="fas fa-search search-icon"></i>
-        
-        <input type="text" id="wordInput" placeholder="知識をインストール...">
-        
-        <button id="searchBtn">EXPLORE</button>
+        <div class="input-container">
+            <i class="fas fa-search search-icon"></i>
+            <input type="text" id="wordInput" placeholder="知識をインストール...">
+            <button id="searchBtn">EXPLORE</button>
+        </div>
+        <p id="statusMessage" class="status-msg"></p>
+    </section>
+
+    <div class="memo-section">
+        <div class="memo-header">
+            <i class="fas fa-list-ul"></i> Exploration Queue
+        </div>
+        <div class="memo-input-area">
+            <input type="text" id="memoInput" placeholder="気になる単語をメモ...">
+            <button id="addMemoBtn"><i class="fas fa-plus"></i></button>
+        </div>
+        <div id="memoContainer" class="memo-list">
+            </div>
     </div>
-    <p id="statusMessage" class="status-msg"></p>
-</section>
 
     <section id="cardContainer" class="card-grid">
-        </section>
+    </section>
 
     <div class="info-panel" id="info-panel">
         <h2 id="panel-title">Node Title</h2>
         <div id="panel-tags"></div>
         <p id="panel-desc">Loading data stream...</p>
         <div class="controls">
-            <button class="action-btn" style="background: rgba(233, 69, 96, 0.8); border:1px solid #e94560;" onclick="deleteNode()">Delete Node</button>
             <button class="action-btn" onclick="closePanel()">Close Link</button>
         </div>
     </div>
@@ -53,12 +58,10 @@
             <span><i class="fas fa-robot"></i> ORBIT ASSISTANT</span>
             <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog"></i> Config</div>
         </div>
-        
         <div class="console-body" id="chat-history">
             <div class="chat-msg system">>> ORBIT System Online.</div>
-            <div class="chat-msg ai">こんにちは。あなたのナレッジ・ベースと連携しています。業界知識について何でも聞いてください。</div>
+            <div class="chat-msg ai">こんにちは。業界知識について何でも聞いてください。</div>
         </div>
-    
         <div class="console-input-area">
             <input type="text" id="chatInput" placeholder="AIに質問... (例: AWSとAzureの違いは？)">
             <button onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
@@ -69,21 +72,28 @@
         <div class="modal-content">
             <h3><i class="fas fa-sliders-h"></i> System Configuration</h3>
             <p style="font-size: 0.8rem; color: #aaa;">Keys are stored locally in your browser.</p>
-            
             <label>AI API Key (Gemini)</label>
             <input type="password" id="openai-key" placeholder="AIza... (Gemini API Key)" onchange="this.value = this.value.trim()">
-            
             <label>Google Search API Key</label>
             <input type="password" id="google-key" placeholder="AIza... (Search API Key)" onchange="this.value = this.value.trim()">
-            
             <label>Google Search Engine ID (CX)</label>
             <input type="text" id="google-cx" placeholder="012345:abcdefg..." onchange="this.value = this.value.trim()">
-            
             <label>Firebase Config (JSON)</label>
             <textarea id="firebase-config" rows="5" placeholder='{"apiKey": "...", ...}'></textarea>
-
             <button class="action-btn" style="width:100%; margin-bottom: 10px;" onclick="saveSettings()">Save & Engage</button>
             <button class="action-btn" style="width:100%; background:transparent; border:1px solid #555; color:#aaa;" onclick="toggleSettings()">Cancel</button>
+        </div>
+    </div>
+
+    <div id="detail-modal">
+        <div class="detail-content">
+            <div class="detail-header">
+                <h2 id="detail-title">Detailed Analysis</h2>
+                <span class="close-modal" onclick="closeDetailModal()">&times;</span>
+            </div>
+            <div id="detail-body" class="detail-body">
+                Loading deep analysis...
+            </div>
         </div>
     </div>
 
