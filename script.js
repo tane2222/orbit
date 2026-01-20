@@ -1,11 +1,17 @@
 // --- Imports ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+// Realtime DB (既存のグラフ用)
 import { getDatabase, ref, set, onValue, remove, push, child, update } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
+// Auth (共通)
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+// ★NEW: Firestore (新しい知識カード用)
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 // --- Global Variables ---
 let network, nodes, edges;
-let db, auth;
+let db;         // Realtime Database (Graph)
+let firestore;  // ★NEW: Firestore (Knowledge Cards)
+let auth;
 let CONFIG = {
     openai: localStorage.getItem('openai_key') || '',
     googleKey: localStorage.getItem('google_key') || '',
@@ -19,6 +25,9 @@ function initGraph() {
     edges = new vis.DataSet([]);
 
     const container = document.getElementById('network');
+    // コンテナがない場合はエラー回避（詳細ページなどでグラフを使わない場合のため）
+    if (!container) return;
+
     const data = { nodes: nodes, edges: edges };
     
     // Orbit Theme Options
@@ -98,32 +107,44 @@ function initGraph() {
                 animation: { duration: 800, easingFunction: 'easeInOutQuad' }
             });
         } else {
-            document.getElementById('info-panel').classList.remove('active');
+            const infoPanel = document.getElementById('info-panel');
+            if(infoPanel) infoPanel.classList.remove('active');
             network.fit({ animation: { duration: 800, easingFunction: 'easeInOutQuad' }});
         }
     });
 }
 
-// --- 2. Firebase Integration (Auth & DB) ---
+// --- 2. Firebase Integration (Auth & DB & Firestore) ---
 function initFirebase() {
     if (!CONFIG.firebase.apiKey) return;
     try {
         const app = initializeApp(CONFIG.firebase);
-        db = getDatabase(app);
+        db = getDatabase(app);        // Realtime Database
+        firestore = getFirestore(app); // ★NEW: Firestore
         auth = getAuth(app);
+        
         logToConsole("Initiating secure uplink to Firebase...", "system");
+        
         signInAnonymously(auth)
             .then(() => {
+                // --- A. Realtime DB Sync (Graph) ---
                 const graphRef = ref(db, 'knowledge-graph');
                 onValue(graphRef, (snapshot) => {
                     const data = snapshot.val();
                     if (data) {
                         const newNodes = data.nodes ? Object.values(data.nodes) : [];
                         const newEdges = data.edges ? Object.values(data.edges) : [];
-                        nodes.clear(); edges.clear(); nodes.add(newNodes); edges.add(newEdges);
-                        logToConsole("Orbit database synchronized (Secure).", "system");
+                        if(nodes) {
+                            nodes.clear(); edges.clear(); nodes.add(newNodes); edges.add(newEdges);
+                        }
+                        logToConsole("Orbit graph database synchronized.", "system");
                     }
-                }, (error) => { logToConsole("Data Stream Error: " + error.message, "error"); });
+                }, (error) => { logToConsole("Graph Stream Error: " + error.message, "error"); });
+
+                // --- B. Firestore Sync (Knowledge Cards) ---
+                // ★NEW: 知識カードの同期を開始
+                initKnowledgeListener();
+
             })
             .catch((error) => { logToConsole("Uplink Failed: " + error.message, "error"); });
     } catch (e) { logToConsole("Firebase Init Error: " + e.message, "error"); }
@@ -173,7 +194,7 @@ async function triggerSearch() {
 
     const centerId = `star_${Date.now()}`;
     const centerNode = { id: centerId, label: term, group: 'core', description: 'Initiating stellar scan...', x: 0, y: 0 };
-    nodes.add(centerNode);
+    if(nodes) nodes.add(centerNode);
     if (db) saveToDB();
 
     const results = await performWebSearch(term);
@@ -188,27 +209,119 @@ async function triggerSearch() {
     });
     const summary = await getAISummary(term, results);
     centerNode.description = summary;
-    nodes.update(centerNode);
-    nodes.add(newNodes);
-    edges.add(newEdges);
+    if(nodes) {
+        nodes.update(centerNode);
+        nodes.add(newNodes);
+        edges.add(newEdges);
+    }
     if (db) saveToDB();
     logToConsole("New stellar system mapped.", "system");
-    network.focus(centerId, { scale: 1.0, animation: { duration: 1000 } });
+    if(network) network.focus(centerId, { scale: 1.0, animation: { duration: 1000 } });
 }
 
-// --- Helper Functions (Attached to Window for HTML calls) ---
+// --- 4. Smart Capture Logic (★NEW FEATURE) ---
+
+// カード表示のリスナー開始
+function initKnowledgeListener() {
+    const cardContainer = document.getElementById('cardContainer');
+    if (!cardContainer || !firestore) return;
+
+    const q = query(collection(firestore, "knowledge_base"), orderBy("timestamp", "desc"));
+    
+    onSnapshot(q, (snapshot) => {
+        cardContainer.innerHTML = ""; // クリア
+        snapshot.forEach((doc) => {
+            const data = doc.data();
+            createCardElement(data, cardContainer);
+        });
+        logToConsole(`Synced ${snapshot.size} knowledge cards.`, "system");
+    });
+}
+
+// 知識カードDOM作成
+function createCardElement(data, container) {
+    const card = document.createElement('div');
+    card.className = 'knowledge-card';
+    const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : 'Just now';
+
+    card.innerHTML = `
+      <div class="card-header">
+        <h3 class="card-title">${data.word}</h3>
+        <span class="card-category">${data.category || 'Uncategorized'}</span>
+      </div>
+      <div class="card-summary">
+        ${data.summary}
+      </div>
+      <div class="card-footer">
+        Recorded: ${dateStr}
+      </div>
+    `;
+    container.appendChild(card);
+}
+
+// 知識カード保存ボタンのイベント
+const captureBtn = document.getElementById('searchBtn'); // HTMLのIDと一致させる
+if (captureBtn) {
+    captureBtn.addEventListener('click', async () => {
+        const wordInput = document.getElementById('wordInput');
+        const statusMessage = document.getElementById('statusMessage');
+        const word = wordInput.value;
+        
+        if (!word) return;
+        if (!firestore) {
+            logToConsole("Database connection not ready.", "error");
+            return;
+        }
+
+        logToConsole(`Analyzing knowledge for "${word}"...`, "ai");
+        statusMessage.textContent = "AIエージェントが調査中...";
+
+        // ★今回はモック（ダミーデータ）を保存
+        // Step 5でここを本物のAI生成データに置き換えます
+        try {
+            await addDoc(collection(firestore, "knowledge_base"), {
+                word: word,
+                category: "Testing Phase",
+                summary: `This is a placeholder summary for **${word}**. The AI agent will eventually populate this with real industry insights, key players, and structured data.`,
+                timestamp: serverTimestamp()
+            });
+
+            wordInput.value = "";
+            statusMessage.textContent = "保存完了！";
+            logToConsole("Knowledge captured successfully.", "system");
+            
+            // 3秒後にメッセージを消す
+            setTimeout(() => { statusMessage.textContent = ""; }, 3000);
+
+        } catch (e) {
+            console.error(e);
+            logToConsole("Save Error: " + e.message, "error");
+            statusMessage.textContent = "エラーが発生しました";
+        }
+    });
+}
+
+
+// --- Helper Functions (Attached to Window) ---
 window.showPanel = function(node) {
-    document.getElementById('panel-title').innerText = node.label;
+    const panelTitle = document.getElementById('panel-title');
+    if(!panelTitle) return; // エラー回避
+
+    panelTitle.innerText = node.label;
     document.getElementById('panel-desc').innerText = node.description || "No data available.";
-    let html = `<span class="tag">${node.group.toUpperCase()} CLASS</span>`;
+    let html = `<span class="tag">${(node.group || 'unknown').toUpperCase()} CLASS</span>`;
     if (node.url) html += `<br><a href="${node.url}" target="_blank" style="color:#66fcf1; text-decoration: none;"><i class="fas fa-rocket"></i> Open Source Link</a>`;
     document.getElementById('panel-tags').innerHTML = html;
     document.getElementById('info-panel').classList.add('active');
     window.currentNodeId = node.id;
 }
-window.closePanel = function() { document.getElementById('info-panel').classList.remove('active'); network.unselectAll(); }
+window.closePanel = function() { 
+    const p = document.getElementById('info-panel');
+    if(p) p.classList.remove('active'); 
+    if(network) network.unselectAll(); 
+}
 window.deleteNode = function() {
-    if (window.currentNodeId) {
+    if (window.currentNodeId && nodes) {
         const relatedEdges = network.getConnectedEdges(window.currentNodeId);
         nodes.remove(window.currentNodeId);
         edges.remove(relatedEdges);
@@ -219,6 +332,8 @@ window.deleteNode = function() {
 }
 window.logToConsole = function(text, type = "ai") {
     const consoleBody = document.getElementById('console-logs');
+    if(!consoleBody) return;
+
     const div = document.createElement('div');
     div.className = `log-entry ${type}`;
     div.innerText = `>> ${text}`;
@@ -251,7 +366,11 @@ window.saveSettings = function() {
 }
 
 // --- Start Up ---
-document.getElementById('search-btn').addEventListener('click', triggerSearch);
-document.getElementById('search-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') triggerSearch(); });
+const mainSearchBtn = document.getElementById('search-btn');
+if(mainSearchBtn) mainSearchBtn.addEventListener('click', triggerSearch);
+
+const mainSearchInput = document.getElementById('search-input');
+if(mainSearchInput) mainSearchInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') triggerSearch(); });
+
 initGraph();
 initFirebase();
