@@ -227,3 +227,20 @@ button.action-btn:hover { background: var(--accent-cyan); color: var(--bg-space-
     top: 150px;
     left: 360px; /* カードエリアの右側にずらす */
 }
+
+<div class="agent-console">
+    <div class="console-header">
+        <span><i class="fas fa-robot"></i> ORBIT ASSISTANT</span>
+        <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog"></i> Config</div>
+    </div>
+    
+    <div class="console-body" id="chat-history">
+        <div class="chat-msg system">>> ORBIT System Online.</div>
+        <div class="chat-msg ai">こんにちは。業界知識について何でも聞いてください。</div>
+    </div>
+
+    <div class="console-input-area">
+        <input type="text" id="chatInput" placeholder="Ask AI... (e.g. AWSとAzureの違いは？)">
+        <button onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
+    </div>
+</div>
