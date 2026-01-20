@@ -1,301 +1,197 @@
 // --- Imports ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-// Realtime DB (既存のグラフ用)
-import { getDatabase, ref, set, onValue, remove, push, child, update } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
-// Auth (共通)
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
-// ★NEW: Firestore (新しい知識カード用)
+import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 // --- Global Variables ---
 let network, nodes, edges;
-let db;         // Realtime Database (Graph)
-let firestore;  // ★NEW: Firestore (Knowledge Cards)
+let firestore;
 let auth;
 let CONFIG = {
-    openai: localStorage.getItem('openai_key') || '',
+    openai: localStorage.getItem('openai_key') || '', // Gemini Key
     googleKey: localStorage.getItem('google_key') || '',
     googleCx: localStorage.getItem('google_cx') || '',
     firebase: JSON.parse(localStorage.getItem('firebase_config') || '{}')
 };
 
-// --- 1. Initialize Vis.js (Orbit Theme) ---
+// --- 1. Initialize Vis.js (Universe Graph) ---
 function initGraph() {
+    // データセットの初期化
     nodes = new vis.DataSet([]);
     edges = new vis.DataSet([]);
 
     const container = document.getElementById('network');
-    // コンテナがない場合はエラー回避（詳細ページなどでグラフを使わない場合のため）
     if (!container) return;
 
     const data = { nodes: nodes, edges: edges };
     
-    // Orbit Theme Options
+    // 宇宙テーマの設定
     const options = {
         nodes: {
             shape: 'dot',
-            font: { size: 16, color: '#ffffff', face: 'Orbitron' },
-            borderWidth: 0,
-            shadow: {
-                enabled: true,
-                color: 'rgba(102, 252, 241, 0.7)',
-                size: 15,
-                x: 0, y: 0
-            }
+            font: { size: 14, color: '#ffffff', face: 'Segoe UI' },
+            borderWidth: 2,
+            shadow: { enabled: true, color: 'rgba(102, 252, 241, 0.5)', size: 10 }
         },
         edges: {
-            width: 2,
-            color: {
-                color: 'rgba(102, 252, 241, 0.4)',
-                highlight: '#66fcf1',
-                opacity: 0.8
-            },
-            shadow: {
-                enabled: true,
-                color: 'rgba(102, 252, 241, 0.5)',
-                size: 5, x: 0, y: 0
-            },
-            smooth: {
-                type: 'dynamic',
-                forceDirection: 'none',
-                roundness: 0.5
-            }
+            width: 1,
+            color: { color: 'rgba(102, 252, 241, 0.2)', highlight: '#66fcf1' },
+            smooth: { type: 'continuous' }
         },
         groups: {
-            core: {
-                size: 50,
-                color: { background: '#ffd700', highlight: { background:'#ffe44d', border:'#ffd700' } },
-                shadow: { color: 'rgba(255, 215, 0, 0.9)', size: 40 },
-                font: { size: 24, color: '#ffd700' }
+            // メインの知識ノード
+            knowledge: {
+                size: 30,
+                color: { background: '#0b1c2c', border: '#66fcf1' },
+                font: { size: 18, color: '#66fcf1' }
             },
-            result: {
-                size: 25,
-                color: { background: '#66fcf1', highlight: { background:'#99fff7', border:'#66fcf1' } },
-                shadow: { color: 'rgba(102, 252, 241, 0.8)', size: 20 }
-            },
-            ai: {
+            // 企業やツールのノード
+            player: {
                 size: 15,
-                color: { background: '#45a29e', highlight: { background:'#66fcf1', border:'#45a29e' } },
-                shadow: { color: 'rgba(69, 162, 158, 0.8)', size: 15 }
+                color: { background: '#1f2833', border: '#45a29e' },
+                font: { size: 12, color: '#c5c6c7' },
+                shape: 'diamond'
+            },
+            // 関連用語のノード
+            related: {
+                size: 10,
+                color: { background: '#333', border: '#888' },
+                font: { size: 10, color: '#888' }
             }
         },
         physics: {
             stabilization: false,
             barnesHut: {
-                gravitationalConstant: -15000,
-                centralGravity: 0.3,
-                springLength: 150,
-                springConstant: 0.02,
+                gravitationalConstant: -20000, // 反発力
+                centralGravity: 0.1,
+                springLength: 120,
+                springConstant: 0.04,
                 damping: 0.09
             }
         },
-        interaction: {
-            hover: true,
-            tooltipDelay: 200,
-            hideEdgesOnDrag: true
-        }
+        interaction: { hover: true, tooltipDelay: 200 }
     };
+
     network = new vis.Network(container, data, options);
 
-    // Interaction Events
+    // ノードクリック時のイベント
     network.on("click", function (params) {
         if (params.nodes.length > 0) {
-            const nodeData = nodes.get(params.nodes[0]);
-            showPanel(nodeData);
+            // クリックしたノードにフォーカス
             network.focus(params.nodes[0], {
                 scale: 1.2,
                 animation: { duration: 800, easingFunction: 'easeInOutQuad' }
             });
-        } else {
-            const infoPanel = document.getElementById('info-panel');
-            if(infoPanel) infoPanel.classList.remove('active');
-            network.fit({ animation: { duration: 800, easingFunction: 'easeInOutQuad' }});
+            // ここで詳細パネルを開く処理などを追加可能
         }
     });
 }
 
-// --- 2. Firebase Integration (Auth & DB & Firestore) ---
+// --- 2. Firebase & Data Sync ---
 function initFirebase() {
     if (!CONFIG.firebase.apiKey) return;
     try {
         const app = initializeApp(CONFIG.firebase);
-        db = getDatabase(app);        // Realtime Database
-        firestore = getFirestore(app); // ★NEW: Firestore
+        firestore = getFirestore(app);
         auth = getAuth(app);
         
-        logToConsole("Initiating secure uplink to Firebase...", "system");
+        logToConsole("Connecting to ORBIT Knowledge Base...", "system");
         
         signInAnonymously(auth)
             .then(() => {
-                // --- A. Realtime DB Sync (Graph) ---
-                const graphRef = ref(db, 'knowledge-graph');
-                onValue(graphRef, (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        const newNodes = data.nodes ? Object.values(data.nodes) : [];
-                        const newEdges = data.edges ? Object.values(data.edges) : [];
-                        if(nodes) {
-                            nodes.clear(); edges.clear(); nodes.add(newNodes); edges.add(newEdges);
-                        }
-                        logToConsole("Orbit graph database synchronized.", "system");
-                    }
-                }, (error) => { logToConsole("Graph Stream Error: " + error.message, "error"); });
-
-                // --- B. Firestore Sync (Knowledge Cards) ---
-                // ★NEW: 知識カードの同期を開始
-                initKnowledgeListener();
-
+                // Firestoreの更新を監視して、グラフとカードリストを同期
+                syncKnowledgeBase();
             })
-            .catch((error) => { logToConsole("Uplink Failed: " + error.message, "error"); });
-    } catch (e) { logToConsole("Firebase Init Error: " + e.message, "error"); }
+            .catch((error) => { logToConsole("Auth Failed: " + error.message, "error"); });
+    } catch (e) { logToConsole("Init Error: " + e.message, "error"); }
 }
 
-function saveToDB() {
-    if (!db || !auth.currentUser) return;
-    const nodesObj = {}; const edgesObj = {};
-    nodes.forEach(n => nodesObj[n.id] = n);
-    edges.forEach(e => edgesObj[e.id] = e);
-    set(ref(db, 'knowledge-graph'), { nodes: nodesObj, edges: edgesObj })
-        .catch(e => logToConsole("Data Save Failed: " + e.message, "error"));
-}
-
-// --- 3. Web Search & AI (Gemini) ---
-async function performWebSearch(query) {
-    if (!CONFIG.googleKey || !CONFIG.googleCx) { logToConsole("Missing Google comms keys.", "error"); return null; }
-    logToConsole(`Scanning deep web for: "${query}"...`, "ai");
-    const url = `https://www.googleapis.com/customsearch/v1?key=${CONFIG.googleKey}&cx=${CONFIG.googleCx}&q=${encodeURIComponent(query)}`;
-    try {
-        const res = await fetch(url);
-        const data = await res.json();
-        return data.items || [];
-    } catch (e) { return []; }
-}
-
-async function getAISummary(topic, searchResults) {
-    const apiKey = (CONFIG.openai || "").trim(); 
-    if (!apiKey) return "AI API Key missing. Cannot analyze.";
-    logToConsole(`Gemini AI analyzing data constellation for "${topic}"...`, "ai");
-    const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
-    const prompt = `Topic: ${topic}\nContext:\n${context}\nTask: Summarize the relationship between these concepts and the topic in Japanese. Be concise and insightful for a knowledge graph perspective (max 120 words). Format as plain text.`;
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    try {
-        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
-        const json = await res.json();
-        if(json.error) throw new Error(json.error.message);
-        return json.candidates?.[0]?.content?.parts?.[0]?.text || "No suitable data found.";
-    } catch (e) { logToConsole("AI Analysis Error: " + e.message, "error"); return "AI analysis failed."; }
-}
-
-async function triggerSearch() {
-    const input = document.getElementById('search-input');
-    const term = input.value;
-    if (!term) return;
-    input.value = "";
-
-    const centerId = `star_${Date.now()}`;
-    const centerNode = { id: centerId, label: term, group: 'core', description: 'Initiating stellar scan...', x: 0, y: 0 };
-    if(nodes) nodes.add(centerNode);
-    if (db) saveToDB();
-
-    const results = await performWebSearch(term);
-    if (!results) return;
-
-    const newNodes = [];
-    const newEdges = [];
-    results.slice(0, 4).forEach((item, index) => {
-        const childId = `${centerId}_planet_${index}`;
-        newNodes.push({ id: childId, label: item.title.length > 12 ? item.title.substring(0, 12)+"..." : item.title, group: 'result', title: item.title, description: item.snippet, url: item.link });
-        newEdges.push({ id: `${centerId}_orbit_${index}`, from: centerId, to: childId });
-    });
-    const summary = await getAISummary(term, results);
-    centerNode.description = summary;
-    if(nodes) {
-        nodes.update(centerNode);
-        nodes.add(newNodes);
-        edges.add(newEdges);
-    }
-    if (db) saveToDB();
-    logToConsole("New stellar system mapped.", "system");
-    if(network) network.focus(centerId, { scale: 1.0, animation: { duration: 1000 } });
-}
-
-// --- 4. Smart Capture Logic (★NEW FEATURE) ---
-
-// カード表示のリスナー開始
-// --- 4. Smart Capture Logic (AI Integration) ---
-
-// カード表示のリスナー（ここは変更なし）
-function initKnowledgeListener() {
+// Firestoreのデータを監視して表示に反映
+function syncKnowledgeBase() {
     const cardContainer = document.getElementById('cardContainer');
-    if (!cardContainer || !firestore) return;
+    if (!firestore) return;
 
+    // 最新順に取得
     const q = query(collection(firestore, "knowledge_base"), orderBy("timestamp", "desc"));
     
     onSnapshot(q, (snapshot) => {
-        cardContainer.innerHTML = "";
+        // 1. カードリストの更新
+        if(cardContainer) cardContainer.innerHTML = "";
+        
+        // 既存のグラフデータをクリアせずに差分更新するのが理想ですが、簡易実装のため一度クリアして再描画します
+        // (ノード数が増えると重くなるので、本来はID管理で差分更新します)
+        nodes.clear();
+        edges.clear();
+
         snapshot.forEach((doc) => {
             const data = doc.data();
-            createCardElement(data, cardContainer);
+            const docId = doc.id;
+
+            // A. サイドバーにカードを追加
+            if(cardContainer) createCardElement(data, cardContainer);
+
+            // B. グラフにノードを追加（メインの知識）
+            try {
+                nodes.add({
+                    id: docId,
+                    label: data.word,
+                    group: 'knowledge',
+                    title: data.summary // ホバー時に要約を表示
+                });
+
+                // C. 子ノード（主要プレイヤー）を追加してリンク
+                if (data.key_players && Array.isArray(data.key_players)) {
+                    data.key_players.forEach((player, index) => {
+                        const playerId = `${docId}_p_${index}`;
+                        const playerName = player.name || player;
+                        
+                        // プレイヤーノード
+                        nodes.add({
+                            id: playerId,
+                            label: playerName,
+                            group: 'player',
+                            title: player.role || 'Key Player'
+                        });
+                        
+                        // エッジ（線）で結ぶ
+                        edges.add({
+                            from: docId,
+                            to: playerId
+                        });
+                    });
+                }
+            } catch (e) {
+                console.log("Graph update skip: Duplicate or error");
+            }
         });
-        logToConsole(`Synced ${snapshot.size} knowledge cards.`, "system");
+        
+        logToConsole(`Visualizing ${snapshot.size} knowledge clusters.`, "system");
     });
 }
 
-// 知識カードDOM作成（内容をリッチにするために少し変更）
-function createCardElement(data, container) {
-    const card = document.createElement('div');
-    card.className = 'knowledge-card';
-    const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : 'Just now';
 
-    // 配列データ（主なプレイヤーなど）をタグ表示用に変換
-    let playersHtml = '';
-    if (data.key_players && Array.isArray(data.key_players)) {
-        playersHtml = data.key_players.map(p => 
-            `<span style="font-size:0.7em; background:#333; color:#ccc; padding:2px 5px; margin-right:4px; border-radius:3px;">${p.name || p}</span>`
-        ).join('');
-    }
-
-    card.innerHTML = `
-      <div class="card-header">
-        <h3 class="card-title">${data.word}</h3>
-        <span class="card-category">${data.category || 'General'}</span>
-      </div>
-      <div class="card-summary">
-        ${data.summary}
-      </div>
-      ${data.analogy ? `<div style="font-size:0.8rem; color:#888; margin-bottom:8px;"><i>💡例え: ${data.analogy}</i></div>` : ''}
-      <div style="margin-bottom:10px;">${playersHtml}</div>
-      <div class="card-footer">
-        Recorded: ${dateStr}
-      </div>
-    `;
-    container.appendChild(card);
-}
-
-// ★AI分析＆保存を行うメイン関数
+// --- 3. AI Logic (Gemini) ---
 async function analyzeAndSave(word) {
-    const apiKey = (CONFIG.openai || "").trim(); // 設定画面の「AI API Key」を使用
-    if (!apiKey) throw new Error("API Key is missing. Please check settings.");
+    const apiKey = (CONFIG.openai || "").trim();
+    if (!apiKey) throw new Error("API Key is missing.");
 
-    // AIへの指示書（プロンプト）
+    // プロンプト：関連用語(related_terms)もリクエストに追加
     const prompt = `
-    You are an expert IT Industry Analyst. 
-    Analyze the term "${word}".
-    Output ONLY a valid JSON object (no markdown, no code blocks) with the following structure:
+    You are an expert IT Analyst. Analyze the term "${word}".
+    Output ONLY valid JSON:
     {
       "word": "${word}",
-      "category": "Identify the specific IT field (e.g., Development, Security, Cloud)",
-      "summary": "A concise explanation for a beginner (max 100 characters) in Japanese.",
-      "analogy": "A simple real-world analogy in Japanese.",
-      "key_players": [{"name": "Company/Tool Name", "role": "Brief role"}],
-      "difficulty": 1 to 5
+      "category": "Broad Category (e.g. Cloud, Dev, AI)",
+      "summary": "Simple definition (Japanese, max 80 chars).",
+      "analogy": "Real-world analogy (Japanese).",
+      "key_players": [{"name": "Name", "role": "Role"}],
+      "related_terms": ["Term1", "Term2", "Term3"]
     }
     Respond in Japanese.
     `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     
-    // API呼び出し
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -305,17 +201,40 @@ async function analyzeAndSave(word) {
     const json = await res.json();
     if (json.error) throw new Error(json.error.message);
 
-    // AIの返答からテキストを取り出す
     let rawText = json.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
-    
-    // Markdownのコードブロック記号が入っていたら削除してJSON化する
     rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-    
-    const aiData = JSON.parse(rawText);
-    return aiData;
+    return JSON.parse(rawText);
 }
 
-// 保存ボタンのイベントリスナー（本番AI接続版）
+// --- 4. DOM Elements & Event Listeners ---
+
+// カード生成用関数
+function createCardElement(data, container) {
+    const card = document.createElement('div');
+    card.className = 'knowledge-card';
+    const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : 'Just now';
+
+    let playersHtml = '';
+    if (data.key_players && Array.isArray(data.key_players)) {
+        playersHtml = data.key_players.map(p => 
+            `<span style="font-size:0.7em; background:rgba(69, 162, 158, 0.2); color:#66fcf1; padding:2px 6px; margin-right:4px; border-radius:3px; border:1px solid rgba(69, 162, 158, 0.5);">${p.name || p}</span>`
+        ).join('');
+    }
+
+    card.innerHTML = `
+      <div class="card-header">
+        <h3 class="card-title">${data.word}</h3>
+        <span class="card-category">${data.category || 'General'}</span>
+      </div>
+      <div class="card-summary">${data.summary}</div>
+      ${data.analogy ? `<div style="font-size:0.8rem; color:#888; margin-bottom:10px; padding:8px; background:rgba(0,0,0,0.2); border-radius:5px;"><i class="fas fa-lightbulb" style="color:#ffd700;"></i> ${data.analogy}</div>` : ''}
+      <div style="margin-bottom:10px;">${playersHtml}</div>
+      <div class="card-footer">Recorded: ${dateStr}</div>
+    `;
+    container.appendChild(card);
+}
+
+// 検索・保存ボタンの処理
 const captureBtn = document.getElementById('searchBtn');
 if (captureBtn) {
     captureBtn.addEventListener('click', async () => {
@@ -329,79 +248,47 @@ if (captureBtn) {
             return;
         }
 
-        // UIをローディング状態にする
-        statusMessage.textContent = "AIエージェントが業界分析中...";
+        statusMessage.textContent = "AI Agent Surveying...";
         captureBtn.disabled = true;
-        captureBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
-        logToConsole(`Agent deployed to analyze sector: "${word}"...`, "ai");
+        captureBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+        logToConsole(`Initiating deep scan for: "${word}"`, "ai");
 
         try {
-            // 1. AIに分析させる
             const aiResult = await analyzeAndSave(word);
             
-            // 2. Firestoreに保存する
             await addDoc(collection(firestore, "knowledge_base"), {
-                ...aiResult, // AIのデータを展開
+                ...aiResult,
                 timestamp: serverTimestamp()
             });
 
-            // 成功時の処理
             wordInput.value = "";
-            statusMessage.textContent = "分析完了・保存しました";
-            logToConsole(`Intel acquired for "${word}".`, "system");
+            statusMessage.textContent = "Data Secured.";
+            logToConsole(`New constellation mapped: ${word}`, "system");
 
         } catch (e) {
             console.error(e);
-            logToConsole("Mission Failed: " + e.message, "error");
-            statusMessage.textContent = "エラー: " + e.message;
+            logToConsole("Error: " + e.message, "error");
+            statusMessage.textContent = "Error!";
         } finally {
-            // ボタンを元に戻す
             captureBtn.disabled = false;
             captureBtn.innerHTML = '解析・保存';
-            setTimeout(() => { statusMessage.textContent = ""; }, 5000);
+            setTimeout(() => { statusMessage.textContent = ""; }, 3000);
         }
     });
 }
 
-
-// --- Helper Functions (Attached to Window) ---
-window.showPanel = function(node) {
-    const panelTitle = document.getElementById('panel-title');
-    if(!panelTitle) return; // エラー回避
-
-    panelTitle.innerText = node.label;
-    document.getElementById('panel-desc').innerText = node.description || "No data available.";
-    let html = `<span class="tag">${(node.group || 'unknown').toUpperCase()} CLASS</span>`;
-    if (node.url) html += `<br><a href="${node.url}" target="_blank" style="color:#66fcf1; text-decoration: none;"><i class="fas fa-rocket"></i> Open Source Link</a>`;
-    document.getElementById('panel-tags').innerHTML = html;
-    document.getElementById('info-panel').classList.add('active');
-    window.currentNodeId = node.id;
-}
-window.closePanel = function() { 
-    const p = document.getElementById('info-panel');
-    if(p) p.classList.remove('active'); 
-    if(network) network.unselectAll(); 
-}
-window.deleteNode = function() {
-    if (window.currentNodeId && nodes) {
-        const relatedEdges = network.getConnectedEdges(window.currentNodeId);
-        nodes.remove(window.currentNodeId);
-        edges.remove(relatedEdges);
-        closePanel();
-        if (db) saveToDB();
-        logToConsole("Celestial body removed from orbit.", "system");
-    }
-}
+// ログ出力
 window.logToConsole = function(text, type = "ai") {
     const consoleBody = document.getElementById('console-logs');
     if(!consoleBody) return;
-
     const div = document.createElement('div');
     div.className = `log-entry ${type}`;
     div.innerText = `>> ${text}`;
     consoleBody.appendChild(div);
     consoleBody.scrollTop = consoleBody.scrollHeight;
 }
+
+// 設定モーダル制御
 window.toggleSettings = function() {
     const modal = document.getElementById('settings-modal');
     modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
@@ -417,22 +304,25 @@ window.saveSettings = function() {
     CONFIG.googleKey = document.getElementById('google-key').value.trim();
     CONFIG.googleCx = document.getElementById('google-cx').value.trim();
     try { const fbValue = document.getElementById('firebase-config').value.trim(); CONFIG.firebase = fbValue ? JSON.parse(fbValue) : {}; } 
-    catch(e) { alert("Firebase Config JSON malformed!"); return; }
+    catch(e) { alert("Invalid JSON"); return; }
+    
     localStorage.setItem('openai_key', CONFIG.openai);
     localStorage.setItem('google_key', CONFIG.googleKey);
     localStorage.setItem('google_cx', CONFIG.googleCx);
     localStorage.setItem('firebase_config', JSON.stringify(CONFIG.firebase));
+    
     toggleSettings();
-    logToConsole("System configuration updated. Rebooting orbit...", "system");
-    setTimeout(() => location.reload(), 1000);
+    location.reload();
 }
 
-// --- Start Up ---
-const mainSearchBtn = document.getElementById('search-btn');
-if(mainSearchBtn) mainSearchBtn.addEventListener('click', triggerSearch);
-
-const mainSearchInput = document.getElementById('search-input');
-if(mainSearchInput) mainSearchInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') triggerSearch(); });
-
+// スタートアップ
 initGraph();
 initFirebase();
+
+// Enterキーでの送信サポート
+const inputField = document.getElementById('wordInput');
+if(inputField) {
+    inputField.addEventListener('keypress', (e) => {
+        if(e.key === 'Enter') document.getElementById('searchBtn').click();
+    });
+}
