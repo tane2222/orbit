@@ -3,53 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Knowledge Nexus - Connected</title>
+    <title>Orbit - AI Knowledge Explorer</title>
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
     
     <style>
-        /* --- CSS Design (前回と同じクールなデザイン) --- */
+        /* --- CSS Design : Universe & Orbit Theme --- */
         :root {
-            --bg-color: #0b0c10;
-            --sidebar-bg: rgba(31, 40, 51, 0.9);
+            /* Deep Space Background */
+            --bg-space-dark: #030518;
+            --bg-space-light: #1a1f4c;
+            /* UI Colors (Kept from previous design) */
+            --sidebar-bg: rgba(20, 30, 48, 0.85); /* Slightly deeper blue */
             --accent-cyan: #66fcf1;
             --accent-dark-cyan: #45a29e;
+            --accent-star-core: #ffd700; /* Gold for Stars */
             --text-main: #c5c6c7;
-            --glass-border: 1px solid rgba(255, 255, 255, 0.1);
+            --glass-border: 1px solid rgba(102, 252, 241, 0.2);
         }
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); color: var(--text-main); overflow: hidden; }
-        #network { width: 100%; height: 100vh; background: radial-gradient(circle at center, #1a1a2e 0%, #0b0c10 100%); }
+
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            font-family: 'Segoe UI', sans-serif;
+            /* Deep Space Gradient Background */
+            background-color: var(--bg-space-dark);
+            background-image: 
+                radial-gradient(circle at 80% 20%, rgba(102, 252, 241, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 20% 80%, rgba(69, 162, 158, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at center, var(--bg-space-light) 0%, var(--bg-space-dark) 100%);
+            color: var(--text-main);
+            overflow: hidden;
+        }
+
+        /* Network Canvas Area */
+        #network { width: 100%; height: 100vh; display: block; /* Ensure it covers bg */ }
         
+        /* --- New: Brand Logo --- */
+        .brand-logo {
+            position: absolute;
+            top: 25px;
+            left: 30px;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            pointer-events: none; /* Prevent interference with clicks */
+        }
+        .brand-logo i {
+            font-size: 2.2rem;
+            color: var(--accent-cyan);
+            text-shadow: 0 0 15px var(--accent-cyan);
+            animation: spinOrbit 10s linear infinite;
+        }
+        .brand-text {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.8rem;
+            color: white;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(102, 252, 241, 0.8);
+        }
+        .brand-text span { color: var(--accent-cyan); }
+
+        @keyframes spinOrbit { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* --- UI Panels (Keeping existing design style) --- */
         /* Top Bar */
-        .top-bar { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; gap: 10px; background: var(--sidebar-bg); padding: 10px 20px; border-radius: 30px; backdrop-filter: blur(10px); border: var(--glass-border); box-shadow: 0 4px 15px rgba(0,0,0,0.5); width: 60%; max-width: 600px; }
-        input#search-input { background: transparent; border: none; color: white; font-size: 1rem; flex-grow: 1; outline: none; }
-        button.action-btn { background: var(--accent-dark-cyan); border: none; color: white; padding: 8px 15px; border-radius: 20px; cursor: pointer; transition: all 0.3s; font-weight: bold; }
-        button.action-btn:hover { background: var(--accent-cyan); color: black; box-shadow: 0 0 10px var(--accent-cyan); }
+        .top-bar { position: absolute; top: 25px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; gap: 10px; background: var(--sidebar-bg); padding: 12px 25px; border-radius: 30px; backdrop-filter: blur(15px); border: var(--glass-border); box-shadow: 0 4px 20px rgba(0,0,0,0.6); width: 50%; max-width: 500px; }
+        input#search-input { background: transparent; border: none; color: white; font-size: 1.1rem; flex-grow: 1; outline: none; }
+        button.action-btn { background: var(--accent-dark-cyan); border: none; color: white; padding: 10px 20px; border-radius: 25px; cursor: pointer; transition: all 0.3s; font-weight: bold; letter-spacing: 1px; }
+        button.action-btn:hover { background: var(--accent-cyan); color: var(--bg-space-dark); box-shadow: 0 0 15px var(--accent-cyan); }
         
         /* Agent Console */
-        .agent-console { position: absolute; bottom: 20px; right: 20px; width: 350px; height: 300px; background: var(--sidebar-bg); border-radius: 10px; border: var(--glass-border); backdrop-filter: blur(10px); z-index: 10; display: flex; flex-direction: column; box-shadow: 0 0 20px rgba(102, 252, 241, 0.1); }
-        .console-header { background: rgba(0,0,0,0.3); padding: 10px; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; color: var(--accent-cyan); border-bottom: var(--glass-border); }
-        .console-body { flex-grow: 1; padding: 10px; font-family: 'Courier New', monospace; font-size: 0.8rem; overflow-y: auto; color: #d1d1d1; display: flex; flex-direction: column; gap: 5px; }
+        .agent-console { position: absolute; bottom: 20px; right: 20px; width: 350px; height: 300px; background: var(--sidebar-bg); border-radius: 10px; border: var(--glass-border); backdrop-filter: blur(15px); z-index: 10; display: flex; flex-direction: column; box-shadow: 0 0 25px rgba(102, 252, 241, 0.15); }
+        .console-header { background: rgba(0,0,0,0.5); padding: 12px; font-size: 0.9rem; display: flex; align-items: center; justify-content: space-between; color: var(--accent-cyan); border-bottom: var(--glass-border); letter-spacing: 1px; }
+        .console-body { flex-grow: 1; padding: 15px; font-family: 'Courier New', monospace; font-size: 0.85rem; overflow-y: auto; color: #d1d1d1; display: flex; flex-direction: column; gap: 8px; }
         .log-entry { opacity: 0; animation: fadeIn 0.3s forwards; word-wrap: break-word; }
-        .log-entry.ai { color: var(--accent-cyan); }
+        .log-entry.ai { color: var(--accent-cyan); text-shadow: 0 0 5px rgba(102,252,241,0.5); }
         .log-entry.system { color: #f0ad4e; }
         .log-entry.error { color: #ff6b6b; }
         
         /* Info Panel */
-        .info-panel { position: absolute; top: 100px; left: 20px; width: 300px; max-height: 70vh; overflow-y: auto; background: var(--sidebar-bg); border-radius: 10px; padding: 20px; border: var(--glass-border); backdrop-filter: blur(10px); z-index: 10; transform: translateX(-400px); transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .info-panel { position: absolute; top: 100px; left: 30px; width: 320px; max-height: 70vh; overflow-y: auto; background: var(--sidebar-bg); border-radius: 12px; padding: 25px; border: var(--glass-border); backdrop-filter: blur(15px); z-index: 10; transform: translateX(-450px); transition: transform 0.4s cubic-bezier(0.22, 0.61, 0.36, 1); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .info-panel.active { transform: translateX(0); }
-        .info-panel h2 { color: var(--accent-cyan); margin-top: 0; }
-        .info-panel p { line-height: 1.6; font-size: 0.9rem; white-space: pre-wrap; }
-        .tag { display: inline-block; background: rgba(102, 252, 241, 0.2); color: var(--accent-cyan); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-right: 5px; margin-bottom: 5px; }
-        .controls { margin-top: 15px; display: flex; gap: 10px; }
+        .info-panel h2 { color: var(--accent-cyan); margin-top: 0; font-family: 'Orbitron', sans-serif; letter-spacing: 1px; text-shadow: 0 0 10px rgba(102, 252, 241, 0.5); }
+        .info-panel p { line-height: 1.7; font-size: 0.95rem; white-space: pre-wrap; color: #e0e0e0; }
+        .tag { display: inline-block; background: rgba(102, 252, 241, 0.15); color: var(--accent-cyan); padding: 4px 10px; border-radius: 6px; font-size: 0.75rem; margin-right: 5px; margin-bottom: 8px; border: 1px solid rgba(102, 252, 241, 0.3); }
+        .controls { margin-top: 20px; display: flex; gap: 10px; }
 
-        /* API Settings Modal (Hidden by default) */
-        #settings-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; display: none; align-items: center; justify-content: center; }
-        .modal-content { background: #1f2833; padding: 30px; border-radius: 10px; border: 1px solid var(--accent-cyan); width: 400px; color: white; }
-        .modal-content input { width: 95%; padding: 8px; margin: 10px 0; background: #0b0c10; border: 1px solid #45a29e; color: white; }
-        .status-dot { width: 10px; height: 10px; border-radius: 50%; background: red; display: inline-block; margin-right: 5px; }
-        .status-dot.online { background: #66fcf1; box-shadow: 0 0 5px #66fcf1; }
-
+        /* API Settings Modal */
+        #settings-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(3, 5, 24, 0.9); z-index: 100; display: none; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+        .modal-content { background: rgba(31, 40, 51, 0.95); padding: 35px; border-radius: 15px; border: 1px solid var(--accent-cyan); width: 450px; color: white; box-shadow: 0 0 30px rgba(102, 252, 241, 0.2); }
+        .modal-content h3 { font-family: 'Orbitron', sans-serif; color: var(--accent-cyan); margin-top: 0; }
+        .modal-content input, .modal-content textarea { width: 100%; padding: 10px; margin: 10px 0 20px; background: rgba(11, 12, 16, 0.8); border: 1px solid var(--accent-dark-cyan); color: var(--accent-cyan); border-radius: 5px; font-family: 'Courier New', monospace; box-sizing: border-box;}
+        .modal-content input:focus, .modal-content textarea:focus { outline: none; border-color: var(--accent-cyan); box-shadow: 0 0 10px rgba(102, 252, 241, 0.5); }
+        
         @keyframes fadeIn { to { opacity: 1; } }
     </style>
 </head>
@@ -57,65 +105,69 @@
 
     <div id="network"></div>
 
+    <div class="brand-logo">
+        <i class="fas fa-atom"></i>
+        <div class="brand-text">ORBIT<span>.ai</span></div>
+    </div>
+
     <div class="top-bar">
         <i class="fas fa-search" style="color: var(--accent-cyan); align-self: center;"></i>
-        <input type="text" id="search-input" placeholder="調査トピックを入力 (例: Web3, 生成AI)...">
-        <button class="action-btn" id="search-btn">Research</button>
+        <input type="text" id="search-input" placeholder="探求したい知識の恒星名を入力...">
+        <button class="action-btn" id="search-btn">EXPLORE</button>
     </div>
 
     <div class="info-panel" id="info-panel">
         <h2 id="panel-title">Node Title</h2>
         <div id="panel-tags"></div>
-        <p id="panel-desc">Loading...</p>
+        <p id="panel-desc">Loading data stream...</p>
         <div class="controls">
-            <button class="action-btn" style="background: #e94560;" onclick="deleteNode()">Delete</button>
-            <button class="action-btn" onclick="closePanel()">Close</button>
+            <button class="action-btn" style="background: rgba(233, 69, 96, 0.8); border:1px solid #e94560;" onclick="deleteNode()">Delete Node</button>
+            <button class="action-btn" onclick="closePanel()">Close Link</button>
         </div>
     </div>
 
     <div class="agent-console">
         <div class="console-header">
-            <span><i class="fas fa-robot"></i> AGENT LOG</span>
-            <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog"></i> Config</div>
+            <span><i class="fas fa-satellite-dish"></i> ORBIT AGENT LOG</span>
+            <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog fa-spin" style="animation-duration: 3s;"></i> Config</div>
         </div>
         <div class="console-body" id="console-logs">
-            <div class="log-entry system">> System initialized.</div>
-            <div class="log-entry system">> <span class="status-dot" id="db-status"></span>Database: Disconnected</div>
+            <div class="log-entry system">>> Orbit system initialized.</div>
+            <div class="log-entry system">>> Standing by for query...</div>
         </div>
     </div>
 
     <div id="settings-modal">
         <div class="modal-content">
-            <h3>API Configurations</h3>
-            <p style="font-size: 0.8rem; color: #ccc;">入力されたキーはブラウザにのみ保存されます。</p>
+            <h3><i class="fas fa-sliders-h"></i> System Configuration</h3>
+            <p style="font-size: 0.8rem; color: #aaa;">Keys are stored locally in your browser orbit.</p>
             
-            <label>AI API Key (Gemini or OpenAI)</label>
-　　　　　　　<input type="password" id="openai-key" placeholder="AI Studioで取得したキー (AIza...)" onchange="this.value = this.value.trim()">
+            <label>AI API Key (Gemini)</label>
+            <input type="password" id="openai-key" placeholder="AIza... (Gemini API Key)" onchange="this.value = this.value.trim()">
             
             <label>Google Search API Key</label>
-            <input type="password" id="google-key" placeholder="AIza...">
+            <input type="password" id="google-key" placeholder="AIza... (Search API Key)" onchange="this.value = this.value.trim()">
             
             <label>Google Search Engine ID (CX)</label>
-            <input type="text" id="google-cx" placeholder="012345...">
+            <input type="text" id="google-cx" placeholder="012345:abcdefg..." onchange="this.value = this.value.trim()">
             
-            <label>Firebase Config (JSON object)</label>
-            <textarea id="firebase-config" rows="5" style="width:95%; background:#0b0c10; color:white; border:1px solid #45a29e;" placeholder='{"apiKey": "...", "authDomain": "...", "databaseURL": "..."}'></textarea>
+            <label>Firebase Config (JSON)</label>
+            <textarea id="firebase-config" rows="5" placeholder='{"apiKey": "...", ...}'></textarea>
 
-            <button class="action-btn" onclick="saveSettings()">Save & Connect</button>
-            <button class="action-btn" style="background:#555;" onclick="toggleSettings()">Cancel</button>
+            <button class="action-btn" style="width:100%; margin-bottom: 10px;" onclick="saveSettings()">Save & Engage</button>
+            <button class="action-btn" style="width:100%; background:transparent; border:1px solid #555; color:#aaa;" onclick="toggleSettings()">Cancel</button>
         </div>
     </div>
 
     <script type="module">
-        // --- Imports (Auth機能を追加) ---
+        // --- Imports ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
         import { getDatabase, ref, set, onValue, remove, push, child, update } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js";
-        // 追加: 認証用モジュール
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
         // --- Global Variables ---
         let network, nodes, edges;
-        let db, auth; // auth変数を追加
+        let db, auth;
         let CONFIG = {
             openai: localStorage.getItem('openai_key') || '',
             googleKey: localStorage.getItem('google_key') || '',
@@ -123,99 +175,140 @@
             firebase: JSON.parse(localStorage.getItem('firebase_config') || '{}')
         };
 
-        // --- 1. Initialize Vis.js (Graph UI) ---
-        // (ここは変更なし)
+        // --- 1. Initialize Vis.js (Orbit Theme Applied!) ---
         function initGraph() {
             nodes = new vis.DataSet([]);
             edges = new vis.DataSet([]);
 
             const container = document.getElementById('network');
             const data = { nodes: nodes, edges: edges };
+            
+            // ★★★ 宇宙テーマのオプション設定 ★★★
             const options = {
-                nodes: { shape: 'dot', size: 20, font: { size: 14, color: '#ffffff' }, borderWidth: 2, shadow: true },
-                edges: { width: 2, color: { color: '#45a29e', highlight: '#66fcf1' }, smooth: { type: "continuous" } },
-                groups: {
-                    core: { color: { background: '#e94560', border: '#e94560' }, size: 30 },
-                    result: { color: { background: '#66fcf1', border: '#66fcf1' } },
-                    ai: { color: { background: '#f0ad4e', border: '#f0ad4e' } }
+                nodes: {
+                    shape: 'dot',
+                    font: { size: 16, color: '#ffffff', face: 'Orbitron' }, // フォントも宇宙風に
+                    borderWidth: 0, // ボーダーをなくして光彩で表現
+                    shadow: {
+                        enabled: true,
+                        color: 'rgba(102, 252, 241, 0.7)', // デフォルトの発光色
+                        size: 15,
+                        x: 0, y: 0
+                    }
                 },
-                physics: { stabilization: false, barnesHut: { gravitationalConstant: -4000 } },
-                interaction: { hover: true }
+                edges: {
+                    width: 2,
+                    color: {
+                        color: 'rgba(102, 252, 241, 0.4)', // 軌道の色（半透明）
+                        highlight: '#66fcf1', // 選択時の色（強く発光）
+                        opacity: 0.8
+                    },
+                    shadow: {
+                        enabled: true,
+                        color: 'rgba(102, 252, 241, 0.5)', // 軌道の発光
+                        size: 5, x: 0, y: 0
+                    },
+                    smooth: {
+                        type: 'dynamic', // 重力を感じさせる滑らかな曲線
+                        forceDirection: 'none',
+                        roundness: 0.5
+                    }
+                },
+                groups: {
+                    // 恒星（検索中心ワード）: 金色に強く輝く巨大な星
+                    core: {
+                        size: 50,
+                        color: { background: '#ffd700', highlight: { background:'#ffe44d', border:'#ffd700' } },
+                        shadow: { color: 'rgba(255, 215, 0, 0.9)', size: 40 },
+                        font: { size: 24, color: '#ffd700' }
+                    },
+                    // 惑星（検索結果）: 青白く輝く中くらいの星
+                    result: {
+                        size: 25,
+                        color: { background: '#66fcf1', highlight: { background:'#99fff7', border:'#66fcf1' } },
+                        shadow: { color: 'rgba(102, 252, 241, 0.8)', size: 20 }
+                    },
+                    // AI（その他）: 少し控えめな星
+                    ai: {
+                        size: 15,
+                        color: { background: '#45a29e', highlight: { background:'#66fcf1', border:'#45a29e' } },
+                        shadow: { color: 'rgba(69, 162, 158, 0.8)', size: 15 }
+                    }
+                },
+                physics: {
+                    // 宇宙的な浮遊感を出す物理設定
+                    stabilization: false,
+                    barnesHut: {
+                        gravitationalConstant: -15000, // 強い反発力で広がりを持たせる
+                        centralGravity: 0.3, // 中心への適度な引力
+                        springLength: 150, // 軌道の距離感
+                        springConstant: 0.02,
+                        damping: 0.09 // 抵抗を減らしてフワフワさせる
+                    }
+                },
+                interaction: {
+                    hover: true,
+                    tooltipDelay: 200,
+                    hideEdgesOnDrag: true
+                }
             };
             network = new vis.Network(container, data, options);
 
+            // Interaction Events
             network.on("click", function (params) {
                 if (params.nodes.length > 0) {
                     const nodeData = nodes.get(params.nodes[0]);
                     showPanel(nodeData);
+                    // クリックしたノードにカメラを寄せる演出
+                    network.focus(params.nodes[0], {
+                        scale: 1.2,
+                        animation: { duration: 800, easingFunction: 'easeInOutQuad' }
+                    });
                 } else {
                     document.getElementById('info-panel').classList.remove('active');
+                    network.fit({ animation: { duration: 800, easingFunction: 'easeInOutQuad' }}); // 全体表示に戻す
                 }
             });
         }
 
-        // --- 2. Firebase Integration (Secure Auth Added) ---
+        // --- 2. Firebase Integration (Auth & DB) ---
         function initFirebase() {
             if (!CONFIG.firebase.apiKey) return;
-            
             try {
                 const app = initializeApp(CONFIG.firebase);
                 db = getDatabase(app);
-                auth = getAuth(app); // Auth初期化
-
-                logToConsole("Connecting to Firebase (Secured)...", "system");
-
-                // ★ここが重要: 匿名ログインを実行
+                auth = getAuth(app);
+                logToConsole("Initiating secure uplink to Firebase...", "system");
                 signInAnonymously(auth)
                     .then(() => {
-                        // ログイン成功後にデータベースを監視開始
                         const graphRef = ref(db, 'knowledge-graph');
                         onValue(graphRef, (snapshot) => {
                             const data = snapshot.val();
                             if (data) {
                                 const newNodes = data.nodes ? Object.values(data.nodes) : [];
                                 const newEdges = data.edges ? Object.values(data.edges) : [];
-                                nodes.clear();
-                                edges.clear();
-                                nodes.add(newNodes);
-                                edges.add(newEdges);
-                                document.getElementById('db-status').classList.add('online');
-                                logToConsole("Database synced (Authenticated).", "system");
+                                nodes.clear(); edges.clear(); nodes.add(newNodes); edges.add(newEdges);
+                                logToConsole("Orbit database synchronized (Secure).", "system");
                             }
-                        }, (error) => {
-                            logToConsole("DB Read Error: " + error.message, "error");
-                        });
+                        }, (error) => { logToConsole("Data Stream Error: " + error.message, "error"); });
                     })
-                    .catch((error) => {
-                        logToConsole("Auth Failed: " + error.message, "error");
-                    });
-
-            } catch (e) {
-                logToConsole("Firebase Init Error: " + e.message, "error");
-            }
+                    .catch((error) => { logToConsole("Uplink Failed: " + error.message, "error"); });
+            } catch (e) { logToConsole("Firebase Init Error: " + e.message, "error"); }
         }
 
-        // Save to Firebase
         function saveToDB() {
-            if (!db || !auth.currentUser) return; // ログインしてなければ保存しない
-            
-            const nodesObj = {};
-            const edgesObj = {};
+            if (!db || !auth.currentUser) return;
+            const nodesObj = {}; const edgesObj = {};
             nodes.forEach(n => nodesObj[n.id] = n);
             edges.forEach(e => edgesObj[e.id] = e);
-
-            set(ref(db, 'knowledge-graph'), {
-                nodes: nodesObj,
-                edges: edgesObj
-            }).catch(e => logToConsole("Save Failed: " + e.message, "error"));
+            set(ref(db, 'knowledge-graph'), { nodes: nodesObj, edges: edgesObj })
+                .catch(e => logToConsole("Data Save Failed: " + e.message, "error"));
         }
 
         // --- 3. Web Search & AI (Gemini) ---
-        // (変更なし、そのままコピペしてください)
         async function performWebSearch(query) {
-            // ... (前回のコードと同じ)
-            if (!CONFIG.googleKey || !CONFIG.googleCx) { logToConsole("Missing Google keys.", "error"); return null; }
-            logToConsole(`Searching: "${query}"...`, "ai");
+            if (!CONFIG.googleKey || !CONFIG.googleCx) { logToConsole("Missing Google comms keys.", "error"); return null; }
+            logToConsole(`Scanning deep web for: "${query}"...`, "ai");
             const url = `https://www.googleapis.com/customsearch/v1?key=${CONFIG.googleKey}&cx=${CONFIG.googleCx}&q=${encodeURIComponent(query)}`;
             try {
                 const res = await fetch(url);
@@ -225,28 +318,29 @@
         }
 
         async function getAISummary(topic, searchResults) {
-            // ... (前回のGemini 2.5 Flash対応コードと同じ)
-             const apiKey = (CONFIG.openai || "").trim(); 
-            if (!apiKey) return "API Key missing.";
-            logToConsole(`Gemini thinking about "${topic}"...`, "ai");
+            const apiKey = (CONFIG.openai || "").trim(); 
+            if (!apiKey) return "AI API Key missing. Cannot analyze.";
+            logToConsole(`Gemini AI analyzing data constellation for "${topic}"...`, "ai");
             const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
-            const prompt = `Topic: ${topic}\nContext:\n${context}\nTask: Summarize relationship in Japanese. Concise.`;
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+            const prompt = `Topic: ${topic}\nContext:\n${context}\nTask: Summarize the relationship between these concepts and the topic in Japanese. Be concise and insightful for a knowledge graph perspective (max 120 words). Format as plain text.`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
             try {
                 const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
                 const json = await res.json();
-                return json.candidates?.[0]?.content?.parts?.[0]?.text || "No text.";
-            } catch (e) { return "AI Error."; }
+                if(json.error) throw new Error(json.error.message);
+                return json.candidates?.[0]?.content?.parts?.[0]?.text || "No suitable data found.";
+            } catch (e) { logToConsole("AI Analysis Error: " + e.message, "error"); return "AI analysis failed."; }
         }
 
         async function triggerSearch() {
-            // ... (前回のコードと同じ)
-             const input = document.getElementById('search-input');
+            const input = document.getElementById('search-input');
             const term = input.value;
             if (!term) return;
             input.value = "";
-            const centerId = `node_${Date.now()}`;
-            const centerNode = { id: centerId, label: term, group: 'core', description: 'Fetching...', x: 0, y: 0 };
+
+            // 恒星（コアノード）の生成
+            const centerId = `star_${Date.now()}`;
+            const centerNode = { id: centerId, label: term, group: 'core', description: 'Initiating stellar scan...', x: 0, y: 0 };
             nodes.add(centerNode);
             if (db) saveToDB();
 
@@ -255,10 +349,11 @@
 
             const newNodes = [];
             const newEdges = [];
-            results.slice(0, 3).forEach((item, index) => {
-                const childId = `${centerId}_child_${index}`;
-                newNodes.push({ id: childId, label: item.title.substring(0, 15) + "...", group: 'result', title: item.title, description: item.snippet, url: item.link });
-                newEdges.push({ id: `${centerId}_edge_${index}`, from: centerId, to: childId });
+            // 惑星（結果ノード）の生成
+            results.slice(0, 4).forEach((item, index) => { // 少し多めに4つ表示
+                const childId = `${centerId}_planet_${index}`;
+                newNodes.push({ id: childId, label: item.title.length > 12 ? item.title.substring(0, 12)+"..." : item.title, group: 'result', title: item.title, description: item.snippet, url: item.link });
+                newEdges.push({ id: `${centerId}_orbit_${index}`, from: centerId, to: childId });
             });
             const summary = await getAISummary(term, results);
             centerNode.description = summary;
@@ -266,16 +361,16 @@
             nodes.add(newNodes);
             edges.add(newEdges);
             if (db) saveToDB();
-            logToConsole("Knowledge graph updated.", "system");
+            logToConsole("New stellar system mapped.", "system");
+            network.focus(centerId, { scale: 1.0, animation: { duration: 1000 } });
         }
 
         // --- Helper Functions ---
-        // (変更なし)
         window.showPanel = function(node) {
             document.getElementById('panel-title').innerText = node.label;
-            document.getElementById('panel-desc').innerText = node.description || "No description.";
-            let html = `<span class="tag">${node.group}</span>`;
-            if (node.url) html += `<br><a href="${node.url}" target="_blank" style="color:#66fcf1;">Open Link <i class="fas fa-external-link-alt"></i></a>`;
+            document.getElementById('panel-desc').innerText = node.description || "No data available.";
+            let html = `<span class="tag">${node.group.toUpperCase()} CLASS</span>`;
+            if (node.url) html += `<br><a href="${node.url}" target="_blank" style="color:#66fcf1; text-decoration: none;"><i class="fas fa-rocket"></i> Open Source Link</a>`;
             document.getElementById('panel-tags').innerHTML = html;
             document.getElementById('info-panel').classList.add('active');
             window.currentNodeId = node.id;
@@ -288,14 +383,14 @@
                 edges.remove(relatedEdges);
                 closePanel();
                 if (db) saveToDB();
-                logToConsole("Node deleted.", "system");
+                logToConsole("Celestial body removed from orbit.", "system");
             }
         }
         window.logToConsole = function(text, type = "ai") {
             const consoleBody = document.getElementById('console-logs');
             const div = document.createElement('div');
             div.className = `log-entry ${type}`;
-            div.innerText = `> ${text}`;
+            div.innerText = `>> ${text}`;
             consoleBody.appendChild(div);
             consoleBody.scrollTop = consoleBody.scrollHeight;
         }
@@ -314,13 +409,13 @@
             CONFIG.googleKey = document.getElementById('google-key').value.trim();
             CONFIG.googleCx = document.getElementById('google-cx').value.trim();
             try { const fbValue = document.getElementById('firebase-config').value.trim(); CONFIG.firebase = fbValue ? JSON.parse(fbValue) : {}; } 
-            catch(e) { alert("Firebase Config JSON format is invalid!"); return; }
+            catch(e) { alert("Firebase Config JSON malformed!"); return; }
             localStorage.setItem('openai_key', CONFIG.openai);
             localStorage.setItem('google_key', CONFIG.googleKey);
             localStorage.setItem('google_cx', CONFIG.googleCx);
             localStorage.setItem('firebase_config', JSON.stringify(CONFIG.firebase));
             toggleSettings();
-            logToConsole("Configuration saved. Reloading...", "system");
+            logToConsole("System configuration updated. Rebooting orbit...", "system");
             setTimeout(() => location.reload(), 1000);
         }
 
