@@ -223,56 +223,58 @@
             }
         }
 
-       // --- 4. AI Summary Logic (Switched to Gemini API) ---
-        async function getAISummary(topic, searchResults) {
-            // 設定画面の "OpenAI Key" 欄に Geminiのキーを入れて使います
-            // ※便宜上 CONFIG.openai をそのまま使いますが、中身はGeminiキーと想定します
-            const apiKey = CONFIG.openai; 
-            
-            if (!apiKey) {
-                return "API Key missing. Cannot generate summary.";
-            }
+       // --- 4. AI Summary Logic (Gemini API Optimized) ---
+async function getAISummary(topic, searchResults) {
+    // 設定画面のキーを取得し、空白を除去
+    const apiKey = (CONFIG.openai || "").trim(); 
+    
+    if (!apiKey) {
+        return "API Key is missing. Please check Config.";
+    }
 
-            logToConsole(`Gemini generating summary for "${topic}"...`, "ai");
+    logToConsole(`Gemini thinking about "${topic}"...`, "ai");
 
-            // Prepare context
-            const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
-            
-            const prompt = `
-            Topic: ${topic}
-            Context:
-            ${context}
-            
-            Task: Summarize the relationship between these concepts and the topic in Japanese. Be concise (max 100 words). Format as plain text.`;
+    // コンテキストの作成
+    const context = searchResults.slice(0, 3).map(item => `- ${item.title}: ${item.snippet}`).join("\n");
+    
+    const prompt = `
+    Topic: ${topic}
+    Context:
+    ${context}
+    
+    Task: Summarize the relationship between these concepts and the topic in Japanese. Be concise (max 100 words). Format as plain text.`;
 
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    // Gemini 2.5 Flash Endpoint
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-            try {
-                const res = await fetch(url, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [{ text: prompt }]
-                        }]
-                    })
-                });
-                
-                const json = await res.json();
-                
-                if (json.error) throw new Error(json.error.message);
-                
-                // Geminiのレスポンス構造からテキストを抽出
-                const text = json.candidates[0].content.parts[0].text;
-                return text;
-
-            } catch (e) {
-                logToConsole("Gemini Error: " + e.message, "error");
-                return "AI processing failed.";
-            }
+    try {
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            })
+        });
+        
+        const json = await res.json();
+        
+        // 詳細なエラーハンドリング
+        if (json.error) {
+            console.error("Gemini API Error Details:", json); // ブラウザのコンソール(F12)にも出す
+            throw new Error(json.error.message || "Invalid API Response");
         }
+        
+        // テキスト抽出
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!text) throw new Error("No text generated.");
+
+        return text;
+
+    } catch (e) {
+        logToConsole("Gemini Error: " + e.message, "error");
+        return "AI processing failed. Check API Key.";
+    }
+}
 
         // --- 5. Orchestration (The "Trigger" Function) ---
         async function triggerSearch() {
@@ -390,26 +392,29 @@
         }
 
         window.saveSettings = function() {
-            CONFIG.openai = document.getElementById('openai-key').value;
-            CONFIG.googleKey = document.getElementById('google-key').value;
-            CONFIG.googleCx = document.getElementById('google-cx').value;
-            try {
-                CONFIG.firebase = JSON.parse(document.getElementById('firebase-config').value);
-            } catch(e) {
-                alert("Firebase Config JSON format is invalid!");
-                return;
-            }
+    // .trim() を追加して保存時にスペースを削除
+    CONFIG.openai = document.getElementById('openai-key').value.trim();
+    CONFIG.googleKey = document.getElementById('google-key').value.trim();
+    CONFIG.googleCx = document.getElementById('google-cx').value.trim();
+    
+    try {
+        const fbValue = document.getElementById('firebase-config').value.trim();
+        CONFIG.firebase = fbValue ? JSON.parse(fbValue) : {};
+    } catch(e) {
+        alert("Firebase Config JSON format is invalid!");
+        return;
+    }
 
-            // Save to LocalStorage
-            localStorage.setItem('openai_key', CONFIG.openai);
-            localStorage.setItem('google_key', CONFIG.googleKey);
-            localStorage.setItem('google_cx', CONFIG.googleCx);
-            localStorage.setItem('firebase_config', JSON.stringify(CONFIG.firebase));
+    // Save to LocalStorage
+    localStorage.setItem('openai_key', CONFIG.openai);
+    localStorage.setItem('google_key', CONFIG.googleKey);
+    localStorage.setItem('google_cx', CONFIG.googleCx);
+    localStorage.setItem('firebase_config', JSON.stringify(CONFIG.firebase));
 
-            toggleSettings();
-            logToConsole("Configuration saved. Reloading...", "system");
-            setTimeout(() => location.reload(), 1000);
-        }
+    toggleSettings();
+    logToConsole("Configuration saved. Reloading...", "system");
+    setTimeout(() => location.reload(), 1000);
+}
 
         // --- Start Up ---
         document.getElementById('search-btn').addEventListener('click', triggerSearch);
