@@ -7,7 +7,7 @@ import { getFirestore, collection, addDoc, deleteDoc, doc, query, orderBy, onSna
 let network, nodes, edges;
 let firestore;
 let auth;
-// ★追加: 検索直後にフォーカスしたいノードIDを一時保存する変数
+// 検索直後にフォーカスしたいノードIDを一時保存する変数
 let pendingFocusId = null;
 
 let CONFIG = {
@@ -27,93 +27,74 @@ function initGraph() {
 
     const data = { nodes: nodes, edges: edges };
     
-    // ★修正: 宇宙っぽさと、緩やかな動きを実現する設定
     const options = {
         nodes: {
             shape: 'dot',
             font: { 
                 size: 14, 
                 color: '#ffffff', 
-                face: 'Orbitron, sans-serif', // フォントを宇宙風に
-                strokeWidth: 0, 
-                strokeColor: '#ffffff'
+                face: 'Segoe UI',
+                strokeWidth: 0
             },
-            borderWidth: 0,
+            borderWidth: 2,
             shadow: { 
                 enabled: true, 
-                color: 'rgba(102, 252, 241, 0.6)', 
-                size: 20, 
-                x: 0, y: 0 
+                color: 'rgba(102, 252, 241, 0.5)', 
+                size: 10 
             }
         },
         edges: {
             width: 1,
             color: { 
-                color: 'rgba(102, 252, 241, 0.15)', // 薄くして軌道っぽく
-                highlight: '#66fcf1',
-                hover: '#66fcf1'
+                color: 'rgba(102, 252, 241, 0.2)', 
+                highlight: '#66fcf1' 
             },
             smooth: { 
                 type: 'continuous',
                 roundness: 0.5
-            },
-            // 長さを自動調整させない（物理演算に任せる）
-            dashes: false 
+            }
         },
+        // ★修正: デザイン設定を元の「青・シアン基調」に戻しました
         groups: {
-            // 恒星（メイン知識）: 大きく、オレンジ/ゴールドに輝く
+            // メインの知識ノード
             knowledge: {
-                size: 45,
-                color: { 
-                    background: '#ff9900', 
-                    border: '#ffd700',
-                    highlight: { background: '#ffcc00', border: '#ffffff' }
-                },
-                font: { size: 18, color: '#ffd700', vadjust: -50 }, // ラベルを少し離す
-                shadow: { color: 'rgba(255, 165, 0, 0.8)', size: 50 } // 強い発光
+                size: 30,
+                color: { background: '#0b1c2c', border: '#66fcf1' },
+                font: { size: 18, color: '#66fcf1' }
             },
-            // 惑星（関連語・プレイヤー）: 小さく、青白く
+            // 企業やツールのノード（ひし形）
             player: {
-                size: 12,
-                color: { 
-                    background: '#00d2ff', 
-                    border: '#ffffff',
-                    highlight: { background: '#66fcf1', border: '#ffffff' }
-                },
-                font: { size: 10, color: '#aaddff', vadjust: -25 },
-                shadow: { color: 'rgba(0, 210, 255, 0.6)', size: 15 }
+                size: 15,
+                color: { background: '#1f2833', border: '#45a29e' },
+                font: { size: 12, color: '#c5c6c7' },
+                shape: 'diamond'
             },
             related: {
-                size: 8,
-                color: { background: '#555555', border: '#888888' },
+                size: 10,
+                color: { background: '#333', border: '#888' },
                 font: { size: 10, color: '#888' }
             }
         },
+        // ★維持: 評価の良かった「ゆったりとした動き」の設定
         physics: {
-            // ★重要: 動きを緩やかにする設定
             enabled: true,
-            solver: 'forceAtlas2Based', // 宇宙のような自然な広がりを作る計算モデル
+            solver: 'forceAtlas2Based',
             forceAtlas2Based: {
-                gravitationalConstant: -100, // 反発力（マイナスが大きいほど離れるが、弱めて密集を防ぐ）
-                centralGravity: 0.005,      // 中心に引き寄せる力（弱くして広がりを持たせる）
-                springLength: 150,          // バネの長さ（軌道半径）
-                springConstant: 0.05,       // バネの強さ
-                damping: 0.8                // 減衰率（1に近いほど空気抵抗が強く、ヌルっと動く）
+                gravitationalConstant: -100, // 適度な反発
+                centralGravity: 0.005,      // 緩やかな中心への引力
+                springLength: 150,
+                springConstant: 0.05,
+                damping: 0.8                // 0.8にすることで水中のような抵抗を作り、爆発を防ぐ
             },
-            maxVelocity: 30, // 移動速度の上限（爆発防止）
-            minVelocity: 0.1, // 停止する閾値
+            maxVelocity: 30, // 速度制限
+            minVelocity: 0.1,
             stabilization: {
                 enabled: true,
-                iterations: 200, // 初期描画時にある程度計算してから表示
+                iterations: 200,
                 updateInterval: 25
             }
         },
-        interaction: { 
-            hover: true, 
-            tooltipDelay: 200,
-            zoomView: true,
-            dragView: true 
-        }
+        interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true }
     };
 
     network = new vis.Network(container, data, options);
@@ -130,7 +111,6 @@ function initGraph() {
             const node = nodes.get(nodeId);
             if(node) showPanel(node);
         } else {
-            // 何もないところをクリックしたらパネルを閉じる
             closePanel();
         }
     });
@@ -164,10 +144,7 @@ function syncKnowledgeBase() {
     onSnapshot(q, (snapshot) => {
         if(cardContainer) cardContainer.innerHTML = "";
         
-        // 既存のノードIDリストを取得（差分チェック用）
         const existingIds = nodes.getIds();
-        
-        // 今回のSnapshotにあるIDリスト
         const newIds = [];
 
         snapshot.forEach((docSnap) => {
@@ -175,22 +152,17 @@ function syncKnowledgeBase() {
             const docId = docSnap.id;
             newIds.push(docId);
 
-            // A. サイドバー用カード
             if(cardContainer) createCardElement(data, docId, cardContainer);
 
-            // B. グラフ用ノード
-            // 既に存在する場合は更新せずスキップ（再描画によるチラつき防止）
-            // ただし、位置情報がない新規ノードは追加する
             if (!existingIds.includes(docId)) {
                 try {
-                    // ★工夫: 新規ノードは画面中央(0,0)付近に初期配置する
-                    // これにより「遠くから飛んでくる」現象を防ぐ
+                    // 新規ノードは画面中央付近に配置（遠くからの飛来防止）
                     nodes.add({
                         id: docId,
                         label: data.word,
                         group: 'knowledge',
                         title: data.summary,
-                        x: (Math.random() - 0.5) * 50, // 中心付近にランダム配置
+                        x: (Math.random() - 0.5) * 50, 
                         y: (Math.random() - 0.5) * 50
                     });
 
@@ -198,7 +170,7 @@ function syncKnowledgeBase() {
                         data.key_players.forEach((player, index) => {
                             const playerId = `${docId}_p_${index}`;
                             const playerName = player.name || player;
-                            newIds.push(playerId); // 子ノードも追跡
+                            newIds.push(playerId);
 
                             nodes.add({
                                 id: playerId,
@@ -221,7 +193,7 @@ function syncKnowledgeBase() {
             }
         });
         
-        // 削除されたノードをグラフから消す
+        // 削除同期
         const idsToRemove = existingIds.filter(id => !newIds.includes(id));
         if(idsToRemove.length > 0) {
             nodes.remove(idsToRemove);
@@ -229,19 +201,18 @@ function syncKnowledgeBase() {
 
         logToConsole(`Visualizing ${snapshot.size} knowledge clusters.`, "system");
 
-        // ★追加: 検索直後の自動フォーカス
+        // 検索直後の自動フォーカス
         if (pendingFocusId && nodes.get(pendingFocusId)) {
-            // 少し遅延させてから移動（ノードの物理演算が落ち着き始めた頃に）
             setTimeout(() => {
                 network.focus(pendingFocusId, {
-                    scale: 1.5, // ズームイン
+                    scale: 1.5,
                     offset: {x: 0, y: 0},
                     animation: {
-                        duration: 1500, // ゆっくり移動
+                        duration: 1500,
                         easingFunction: 'easeInOutCubic'
                     }
                 });
-                pendingFocusId = null; // リセット
+                pendingFocusId = null;
             }, 500);
         }
     });
@@ -335,9 +306,7 @@ async function getDetailedSummary(word) {
 function createCardElement(data, docId, container) {
     const card = document.createElement('div');
     card.className = 'knowledge-card';
-    // クリックでグラフ上のそのノードへ飛ぶ機能を追加
     card.onclick = (e) => {
-        // ボタンクリック時は発動しないように制御
         if(e.target.tagName === 'BUTTON' || e.target.tagName === 'I') return;
         network.focus(docId, { scale: 1.2, animation: { duration: 1000 } });
         showPanel({ label: data.word, title: data.summary, group: 'knowledge' });
@@ -461,13 +430,11 @@ if (captureBtn) {
         try {
             const aiResult = await analyzeAndSave(word);
             
-            // 保存し、そのIDを取得
             const docRef = await addDoc(collection(firestore, "knowledge_base"), {
                 ...aiResult,
                 timestamp: serverTimestamp()
             });
 
-            // ★追加: 描画更新後にフォーカスするためのIDをセット
             pendingFocusId = docRef.id;
 
             wordInput.value = "";
