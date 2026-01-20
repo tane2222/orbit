@@ -222,6 +222,9 @@ async function triggerSearch() {
 // --- 4. Smart Capture Logic (★NEW FEATURE) ---
 
 // カード表示のリスナー開始
+// --- 4. Smart Capture Logic (AI Integration) ---
+
+// カード表示のリスナー（ここは変更なし）
 function initKnowledgeListener() {
     const cardContainer = document.getElementById('cardContainer');
     if (!cardContainer || !firestore) return;
@@ -229,7 +232,7 @@ function initKnowledgeListener() {
     const q = query(collection(firestore, "knowledge_base"), orderBy("timestamp", "desc"));
     
     onSnapshot(q, (snapshot) => {
-        cardContainer.innerHTML = ""; // クリア
+        cardContainer.innerHTML = "";
         snapshot.forEach((doc) => {
             const data = doc.data();
             createCardElement(data, cardContainer);
@@ -238,20 +241,30 @@ function initKnowledgeListener() {
     });
 }
 
-// 知識カードDOM作成
+// 知識カードDOM作成（内容をリッチにするために少し変更）
 function createCardElement(data, container) {
     const card = document.createElement('div');
     card.className = 'knowledge-card';
     const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : 'Just now';
 
+    // 配列データ（主なプレイヤーなど）をタグ表示用に変換
+    let playersHtml = '';
+    if (data.key_players && Array.isArray(data.key_players)) {
+        playersHtml = data.key_players.map(p => 
+            `<span style="font-size:0.7em; background:#333; color:#ccc; padding:2px 5px; margin-right:4px; border-radius:3px;">${p.name || p}</span>`
+        ).join('');
+    }
+
     card.innerHTML = `
       <div class="card-header">
         <h3 class="card-title">${data.word}</h3>
-        <span class="card-category">${data.category || 'Uncategorized'}</span>
+        <span class="card-category">${data.category || 'General'}</span>
       </div>
       <div class="card-summary">
         ${data.summary}
       </div>
+      ${data.analogy ? `<div style="font-size:0.8rem; color:#888; margin-bottom:8px;"><i>💡例え: ${data.analogy}</i></div>` : ''}
+      <div style="margin-bottom:10px;">${playersHtml}</div>
       <div class="card-footer">
         Recorded: ${dateStr}
       </div>
@@ -259,8 +272,51 @@ function createCardElement(data, container) {
     container.appendChild(card);
 }
 
-// 知識カード保存ボタンのイベント
-const captureBtn = document.getElementById('searchBtn'); // HTMLのIDと一致させる
+// ★AI分析＆保存を行うメイン関数
+async function analyzeAndSave(word) {
+    const apiKey = (CONFIG.openai || "").trim(); // 設定画面の「AI API Key」を使用
+    if (!apiKey) throw new Error("API Key is missing. Please check settings.");
+
+    // AIへの指示書（プロンプト）
+    const prompt = `
+    You are an expert IT Industry Analyst. 
+    Analyze the term "${word}".
+    Output ONLY a valid JSON object (no markdown, no code blocks) with the following structure:
+    {
+      "word": "${word}",
+      "category": "Identify the specific IT field (e.g., Development, Security, Cloud)",
+      "summary": "A concise explanation for a beginner (max 100 characters) in Japanese.",
+      "analogy": "A simple real-world analogy in Japanese.",
+      "key_players": [{"name": "Company/Tool Name", "role": "Brief role"}],
+      "difficulty": 1 to 5
+    }
+    Respond in Japanese.
+    `;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    
+    // API呼び出し
+    const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    });
+
+    const json = await res.json();
+    if (json.error) throw new Error(json.error.message);
+
+    // AIの返答からテキストを取り出す
+    let rawText = json.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+    
+    // Markdownのコードブロック記号が入っていたら削除してJSON化する
+    rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+    
+    const aiData = JSON.parse(rawText);
+    return aiData;
+}
+
+// 保存ボタンのイベントリスナー（本番AI接続版）
+const captureBtn = document.getElementById('searchBtn');
 if (captureBtn) {
     captureBtn.addEventListener('click', async () => {
         const wordInput = document.getElementById('wordInput');
@@ -269,34 +325,40 @@ if (captureBtn) {
         
         if (!word) return;
         if (!firestore) {
-            logToConsole("Database connection not ready.", "error");
+            logToConsole("Database not ready.", "error");
             return;
         }
 
-        logToConsole(`Analyzing knowledge for "${word}"...`, "ai");
-        statusMessage.textContent = "AIエージェントが調査中...";
+        // UIをローディング状態にする
+        statusMessage.textContent = "AIエージェントが業界分析中...";
+        captureBtn.disabled = true;
+        captureBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing...';
+        logToConsole(`Agent deployed to analyze sector: "${word}"...`, "ai");
 
-        // ★今回はモック（ダミーデータ）を保存
-        // Step 5でここを本物のAI生成データに置き換えます
         try {
+            // 1. AIに分析させる
+            const aiResult = await analyzeAndSave(word);
+            
+            // 2. Firestoreに保存する
             await addDoc(collection(firestore, "knowledge_base"), {
-                word: word,
-                category: "Testing Phase",
-                summary: `This is a placeholder summary for **${word}**. The AI agent will eventually populate this with real industry insights, key players, and structured data.`,
+                ...aiResult, // AIのデータを展開
                 timestamp: serverTimestamp()
             });
 
+            // 成功時の処理
             wordInput.value = "";
-            statusMessage.textContent = "保存完了！";
-            logToConsole("Knowledge captured successfully.", "system");
-            
-            // 3秒後にメッセージを消す
-            setTimeout(() => { statusMessage.textContent = ""; }, 3000);
+            statusMessage.textContent = "分析完了・保存しました";
+            logToConsole(`Intel acquired for "${word}".`, "system");
 
         } catch (e) {
             console.error(e);
-            logToConsole("Save Error: " + e.message, "error");
-            statusMessage.textContent = "エラーが発生しました";
+            logToConsole("Mission Failed: " + e.message, "error");
+            statusMessage.textContent = "エラー: " + e.message;
+        } finally {
+            // ボタンを元に戻す
+            captureBtn.disabled = false;
+            captureBtn.innerHTML = '解析・保存';
+            setTimeout(() => { statusMessage.textContent = ""; }, 5000);
         }
     });
 }
