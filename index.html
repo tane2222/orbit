@@ -38,7 +38,37 @@
             <button id="addMemoBtn"><i class="fas fa-plus"></i></button>
         </div>
         <div id="memoContainer" class="memo-list">
+        </div>
+    </div>
+
+    <div class="bookshelf-section">
+        <div class="bookshelf-header">
+            <i class="fas fa-book"></i> Knowledge Bookshelf
+        </div>
+        <div id="folderList" class="folder-list">
+            <div class="folder-item active">All Items</div>
+        </div>
+    </div>
+
+    <section id="cardContainer" class="card-grid">
+    </section>
+
+<div id="settings-modal">
+        <div class="modal-content">
+            <h3><i class="fas fa-sliders-h"></i> System Configuration</h3>
+            <label>Firebase Config (JSON)</label>
+            <textarea id="firebase-config" rows="5" placeholder='{"apiKey": "...", ...}'></textarea>
+
+            <button class="action-btn" style="width:100%; margin-bottom: 10px;" onclick="saveSettings()">Save & Engage</button>
+            <button class="action-btn" style="width:100%; background:transparent; border:1px solid #555; color:#aaa;" onclick="toggleSettings()">Cancel</button>
+            
+            <div style="margin-top: 20px; border-top: 1px solid #333; padding-top: 15px;">
+                <h4 style="color:#ff6b6b; margin: 0 0 10px 0; font-size:0.9rem;">Danger Zone</h4>
+                <button class="action-btn danger" onclick="resetAllData()">
+                    <i class="fas fa-bomb"></i> Reset All Knowledge
+                </button>
             </div>
+        </div>
     </div>
 
     <section id="cardContainer" class="card-grid">
