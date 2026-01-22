@@ -1,14 +1,17 @@
 // --- Imports ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
 import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, serverTimestamp, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
 // --- Global Variables ---
 let network, nodes, edges;
 let firestore;
 let auth;
-// 検索直後にフォーカスしたいノードIDを一時保存する変数
 let pendingFocusId = null;
+
+// ★追加: データ管理用
+let allDocs = []; // Firestoreから取得した全データ
+let currentFolder = null; // 現在選択中のフォルダ（カテゴリ）
 
 let CONFIG = {
     openai: localStorage.getItem('openai_key') || '', 
@@ -17,7 +20,7 @@ let CONFIG = {
     firebase: JSON.parse(localStorage.getItem('firebase_config') || '{}')
 };
 
-// --- 1. Initialize Vis.js (Universe Graph) ---
+// --- 1. Initialize Vis.js ---
 function initGraph() {
     nodes = new vis.DataSet([]);
     edges = new vis.DataSet([]);
@@ -30,39 +33,21 @@ function initGraph() {
     const options = {
         nodes: {
             shape: 'dot',
-            font: { 
-                size: 14, 
-                color: '#ffffff', 
-                face: 'Segoe UI',
-                strokeWidth: 0
-            },
+            font: { size: 14, color: '#ffffff', face: 'Segoe UI', strokeWidth: 0 },
             borderWidth: 2,
-            shadow: { 
-                enabled: true, 
-                color: 'rgba(102, 252, 241, 0.5)', 
-                size: 10 
-            }
+            shadow: { enabled: true, color: 'rgba(102, 252, 241, 0.5)', size: 10 }
         },
         edges: {
             width: 1,
-            color: { 
-                color: 'rgba(102, 252, 241, 0.2)', 
-                highlight: '#66fcf1' 
-            },
-            smooth: { 
-                type: 'continuous',
-                roundness: 0.5
-            }
+            color: { color: 'rgba(102, 252, 241, 0.2)', highlight: '#66fcf1' },
+            smooth: { type: 'continuous', roundness: 0.5 }
         },
-        // ★修正: デザイン設定を元の「青・シアン基調」に戻しました
         groups: {
-            // メインの知識ノード
             knowledge: {
                 size: 30,
                 color: { background: '#0b1c2c', border: '#66fcf1' },
                 font: { size: 18, color: '#66fcf1' }
             },
-            // 企業やツールのノード（ひし形）
             player: {
                 size: 15,
                 color: { background: '#1f2833', border: '#45a29e' },
@@ -75,38 +60,28 @@ function initGraph() {
                 font: { size: 10, color: '#888' }
             }
         },
-        // ★維持: 評価の良かった「ゆったりとした動き」の設定
         physics: {
             enabled: true,
             solver: 'forceAtlas2Based',
             forceAtlas2Based: {
-                gravitationalConstant: -100, // 適度な反発
-                centralGravity: 0.005,      // 緩やかな中心への引力
+                gravitationalConstant: -100,
+                centralGravity: 0.005,
                 springLength: 150,
                 springConstant: 0.05,
-                damping: 0.8                // 0.8にすることで水中のような抵抗を作り、爆発を防ぐ
+                damping: 0.8
             },
-            maxVelocity: 30, // 速度制限
+            maxVelocity: 30,
             minVelocity: 0.1,
-            stabilization: {
-                enabled: true,
-                iterations: 200,
-                updateInterval: 25
-            }
+            stabilization: { enabled: true, iterations: 200, updateInterval: 25 }
         },
         interaction: { hover: true, tooltipDelay: 200, zoomView: true, dragView: true }
     };
 
     network = new vis.Network(container, data, options);
 
-    // クリック時のイベント
     network.on("click", function (params) {
         if (params.nodes.length > 0) {
-            network.focus(params.nodes[0], {
-                scale: 1.2,
-                animation: { duration: 1000, easingFunction: 'easeInOutQuad' }
-            });
-            
+            network.focus(params.nodes[0], { scale: 1.2, animation: { duration: 1000 } });
             const nodeId = params.nodes[0];
             const node = nodes.get(nodeId);
             if(node) showPanel(node);
@@ -135,111 +110,144 @@ function initFirebase() {
     } catch (e) { logToConsole("Init Error: " + e.message, "error"); }
 }
 
+// データ同期ロジック（取得と描画を分離）
 function syncKnowledgeBase() {
-    const cardContainer = document.getElementById('cardContainer');
     if (!firestore) return;
-
     const q = query(collection(firestore, "knowledge_base"), orderBy("timestamp", "desc"));
     
     onSnapshot(q, (snapshot) => {
-        if(cardContainer) cardContainer.innerHTML = "";
-        
-        const existingIds = nodes.getIds();
-        const newIds = [];
-
-        snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            const docId = docSnap.id;
-            newIds.push(docId);
-
-            if(cardContainer) createCardElement(data, docId, cardContainer);
-
-            if (!existingIds.includes(docId)) {
-                try {
-                    // 新規ノードは画面中央付近に配置（遠くからの飛来防止）
-                    nodes.add({
-                        id: docId,
-                        label: data.word,
-                        group: 'knowledge',
-                        title: data.summary,
-                        x: (Math.random() - 0.5) * 50, 
-                        y: (Math.random() - 0.5) * 50
-                    });
-
-                    if (data.key_players && Array.isArray(data.key_players)) {
-                        data.key_players.forEach((player, index) => {
-                            const playerId = `${docId}_p_${index}`;
-                            const playerName = player.name || player;
-                            newIds.push(playerId);
-
-                            nodes.add({
-                                id: playerId,
-                                label: playerName,
-                                group: 'player',
-                                title: player.role || 'Key Player',
-                                x: (Math.random() - 0.5) * 50,
-                                y: (Math.random() - 0.5) * 50
-                            });
-                            
-                            edges.add({
-                                from: docId,
-                                to: playerId
-                            });
-                        });
-                    }
-                } catch (e) {
-                    console.log("Node add skip");
-                }
-            }
+        // 1. データを全取得してメモリに保持
+        allDocs = [];
+        snapshot.forEach((doc) => {
+            allDocs.push({ id: doc.id, data: doc.data() });
         });
-        
-        // 削除同期
-        const idsToRemove = existingIds.filter(id => !newIds.includes(id));
-        if(idsToRemove.length > 0) {
-            nodes.remove(idsToRemove);
-        }
 
-        logToConsole(`Visualizing ${snapshot.size} knowledge clusters.`, "system");
+        // 2. 本棚（カテゴリ一覧）を更新
+        updateBookshelfUI();
 
-        // 検索直後の自動フォーカス
-        if (pendingFocusId && nodes.get(pendingFocusId)) {
-            setTimeout(() => {
-                network.focus(pendingFocusId, {
-                    scale: 1.5,
-                    offset: {x: 0, y: 0},
-                    animation: {
-                        duration: 1500,
-                        easingFunction: 'easeInOutCubic'
-                    }
-                });
-                pendingFocusId = null;
-            }, 500);
-        }
+        // 3. 画面描画（フィルタリング適用）
+        renderKnowledgeBase();
     });
 }
 
-function syncMemos() {
-    const memoContainer = document.getElementById('memoContainer');
-    if (!firestore || !memoContainer) return;
+// ★追加: 本棚UIの更新
+function updateBookshelfUI() {
+    const folderList = document.getElementById('folderList');
+    if (!folderList) return;
 
-    const q = query(collection(firestore, "memos"), orderBy("timestamp", "desc"));
-
-    onSnapshot(q, (snapshot) => {
-        memoContainer.innerHTML = "";
-        snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            const div = document.createElement('div');
-            div.className = 'memo-item';
-            div.innerHTML = `
-                <span>${data.text}</span>
-                <div class="memo-actions">
-                    <i class="fas fa-search" onclick="analyzeFromMemo('${data.text}', '${docSnap.id}')" title="Explore"></i>
-                    <i class="fas fa-trash" onclick="deleteMemo('${docSnap.id}')" title="Delete"></i>
-                </div>
-            `;
-            memoContainer.appendChild(div);
-        });
+    // カテゴリを集計
+    const categories = {};
+    allDocs.forEach(doc => {
+        const cat = doc.data.category || 'Uncategorized';
+        categories[cat] = (categories[cat] || 0) + 1;
     });
+
+    // HTML生成
+    let html = `
+        <div class="folder-item ${currentFolder === null ? 'active' : ''}" onclick="selectFolder(null)">
+            <span><i class="fas fa-layer-group"></i> All Items</span>
+            <span class="folder-count">${allDocs.length}</span>
+        </div>
+    `;
+
+    Object.keys(categories).sort().forEach(cat => {
+        html += `
+        <div class="folder-item ${currentFolder === cat ? 'active' : ''}" onclick="selectFolder('${cat}')">
+            <span><i class="fas fa-folder"></i> ${cat}</span>
+            <span class="folder-count">${categories[cat]}</span>
+        </div>
+        `;
+    });
+
+    folderList.innerHTML = html;
+}
+
+// ★追加: フォルダ選択時の処理
+window.selectFolder = function(folderName) {
+    currentFolder = folderName;
+    updateBookshelfUI(); // アクティブ表示の切り替え
+    renderKnowledgeBase(); // グラフとカードの再描画
+}
+
+// ★修正: 描画ロジック（フィルタリング対応）
+function renderKnowledgeBase() {
+    const cardContainer = document.getElementById('cardContainer');
+    if(cardContainer) cardContainer.innerHTML = "";
+
+    const existingIds = nodes.getIds();
+    const newIds = []; // 今回表示すべきIDリスト
+
+    // フィルタリング
+    const filteredDocs = currentFolder 
+        ? allDocs.filter(d => d.data.category === currentFolder)
+        : allDocs;
+
+    filteredDocs.forEach((docObj) => {
+        const data = docObj.data;
+        const docId = docObj.id;
+        newIds.push(docId);
+
+        // A. カード描画
+        if(cardContainer) createCardElement(data, docId, cardContainer);
+
+        // B. ノード描画
+        if (!existingIds.includes(docId)) {
+            try {
+                nodes.add({
+                    id: docId,
+                    label: data.word,
+                    group: 'knowledge',
+                    title: data.summary,
+                    x: (Math.random() - 0.5) * 50, 
+                    y: (Math.random() - 0.5) * 50
+                });
+
+                if (data.key_players && Array.isArray(data.key_players)) {
+                    data.key_players.forEach((player, index) => {
+                        const playerId = `${docId}_p_${index}`;
+                        const playerName = player.name || player;
+                        newIds.push(playerId);
+
+                        nodes.add({
+                            id: playerId,
+                            label: playerName,
+                            group: 'player',
+                            title: player.role || 'Key Player',
+                            x: (Math.random() - 0.5) * 50,
+                            y: (Math.random() - 0.5) * 50
+                        });
+                        
+                        edges.add({ from: docId, to: playerId });
+                    });
+                }
+            } catch (e) { console.log("Node skip"); }
+        } else {
+            // 子ノードも表示対象IDに追加しておく（消えないように）
+            if (data.key_players && Array.isArray(data.key_players)) {
+                data.key_players.forEach((_, index) => {
+                    newIds.push(`${docId}_p_${index}`);
+                });
+            }
+        }
+    });
+
+    // フィルタリングで除外された（または削除された）ノードを消す
+    const idsToRemove = existingIds.filter(id => !newIds.includes(id));
+    if(idsToRemove.length > 0) {
+        nodes.remove(idsToRemove);
+    }
+
+    // 自動フォーカス
+    if (pendingFocusId && nodes.get(pendingFocusId)) {
+        setTimeout(() => {
+            network.focus(pendingFocusId, {
+                scale: 1.5,
+                offset: {x: 0, y: 0},
+                animation: { duration: 1500, easingFunction: 'easeInOutCubic' }
+            });
+            pendingFocusId = null;
+        }, 500);
+    }
 }
 
 // --- 3. AI Logic ---
@@ -262,7 +270,6 @@ async function analyzeAndSave(word) {
     `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    
     const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -280,17 +287,7 @@ async function analyzeAndSave(word) {
 async function getDetailedSummary(word) {
     const apiKey = (CONFIG.openai || "").trim();
     if (!apiKey) return "API Key missing.";
-
-    const prompt = `
-    Explain the term "${word}" in detail for an IT professional.
-    Structure:
-    1. Detailed Definition
-    2. Historical Background
-    3. Pros & Cons
-    4. Use Cases
-    Respond in Japanese. Output plain text.
-    `;
-    
+    const prompt = `Explain "${word}" in detail (Definition, History, Pros/Cons, UseCases). Japanese. Plain text.`;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     const res = await fetch(url, {
         method: "POST",
@@ -301,8 +298,7 @@ async function getDetailedSummary(word) {
     return json.candidates?.[0]?.content?.parts?.[0]?.text || "No details found.";
 }
 
-// --- 4. DOM Elements ---
-
+// --- 4. DOM Elements & Functions ---
 function createCardElement(data, docId, container) {
     const card = document.createElement('div');
     card.className = 'knowledge-card';
@@ -314,7 +310,6 @@ function createCardElement(data, docId, container) {
     card.style.cursor = "pointer";
 
     const dateStr = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleDateString() : 'Just now';
-
     let playersHtml = '';
     if (data.key_players && Array.isArray(data.key_players)) {
         playersHtml = data.key_players.map(p => 
@@ -344,11 +339,46 @@ window.deleteCard = async function(docId, word) {
     try {
         await deleteDoc(doc(firestore, "knowledge_base", docId));
         logToConsole(`Deleted: ${word}`, "system");
+    } catch(e) { logToConsole("Delete Error: " + e.message, "error"); }
+}
+
+// ★追加: リセット機能（全データ削除）
+window.resetAllData = async function() {
+    if(!confirm("【警告】\nこれまでに保存した全ての知識データとメモを完全に消去します。\nこの操作は取り消せません。\n本当によろしいですか？")) return;
+    
+    logToConsole("Initiating System Reset...", "error");
+    
+    try {
+        // knowledge_baseの削除
+        const kbQuery = query(collection(firestore, "knowledge_base"));
+        const kbSnapshot = await getDocs(kbQuery);
+        const batch = writeBatch(firestore);
+        
+        kbSnapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+
+        // memosの削除
+        const memoQuery = query(collection(firestore, "memos"));
+        const memoSnapshot = await getDocs(memoQuery);
+        memoSnapshot.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+
+        await batch.commit();
+        
+        logToConsole("System Reset Complete. All data cleared.", "system");
+        alert("リセットが完了しました。");
+        toggleSettings();
+
     } catch(e) {
-        logToConsole("Delete Error: " + e.message, "error");
+        console.error(e);
+        logToConsole("Reset Failed: " + e.message, "error");
+        alert("リセット中にエラーが発生しました。");
     }
 }
 
+// UI Helpers
 window.openDetail = async function(word) {
     const modal = document.getElementById('detail-modal');
     const body = document.getElementById('detail-body');
@@ -381,21 +411,39 @@ function showPanel(node) {
     }
     panelControls.innerHTML = html;
 }
-
 window.investigateNode = function(word) {
     document.getElementById('wordInput').value = word;
     document.getElementById('searchBtn').click();
     closePanel();
 }
 
+// Memos
+function syncMemos() {
+    const memoContainer = document.getElementById('memoContainer');
+    if (!firestore || !memoContainer) return;
+    const q = query(collection(firestore, "memos"), orderBy("timestamp", "desc"));
+    onSnapshot(q, (snapshot) => {
+        memoContainer.innerHTML = "";
+        snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            const div = document.createElement('div');
+            div.className = 'memo-item';
+            div.innerHTML = `
+                <span>${data.text}</span>
+                <div class="memo-actions">
+                    <i class="fas fa-search" onclick="analyzeFromMemo('${data.text}', '${docSnap.id}')" title="Explore"></i>
+                    <i class="fas fa-trash" onclick="deleteMemo('${docSnap.id}')" title="Delete"></i>
+                </div>
+            `;
+            memoContainer.appendChild(div);
+        });
+    });
+}
 window.addMemo = async function() {
     const input = document.getElementById('memoInput');
     const text = input.value.trim();
     if(!text || !firestore) return;
-    try {
-        await addDoc(collection(firestore, "memos"), { text: text, timestamp: serverTimestamp() });
-        input.value = "";
-    } catch(e) { console.error(e); }
+    try { await addDoc(collection(firestore, "memos"), { text: text, timestamp: serverTimestamp() }); input.value = ""; } catch(e) {}
 }
 window.analyzeFromMemo = function(text, docId) {
     document.getElementById('wordInput').value = text;
@@ -403,12 +451,12 @@ window.analyzeFromMemo = function(text, docId) {
     deleteMemo(docId);
 }
 window.deleteMemo = async function(docId) {
-    try { await deleteDoc(doc(firestore, "memos", docId)); } catch(e) { console.error(e); }
+    try { await deleteDoc(doc(firestore, "memos", docId)); } catch(e) {}
 }
 const addMemoBtn = document.getElementById('addMemoBtn');
 if(addMemoBtn) addMemoBtn.addEventListener('click', window.addMemo);
 
-// --- Main Search Event ---
+// Search
 const captureBtn = document.getElementById('searchBtn');
 if (captureBtn) {
     captureBtn.addEventListener('click', async () => {
@@ -429,18 +477,14 @@ if (captureBtn) {
 
         try {
             const aiResult = await analyzeAndSave(word);
-            
             const docRef = await addDoc(collection(firestore, "knowledge_base"), {
                 ...aiResult,
                 timestamp: serverTimestamp()
             });
-
             pendingFocusId = docRef.id;
-
             wordInput.value = "";
             statusMessage.textContent = "Data Secured.";
             logToConsole(`New constellation mapped: ${word}`, "system");
-
         } catch (e) {
             console.error(e);
             logToConsole("Error: " + e.message, "error");
@@ -453,15 +497,11 @@ if (captureBtn) {
     });
 }
 
-// --- Chat & Context ---
+// Chat
 async function getRecentContext() {
-    if (!nodes) return "";
-    try { if (nodes.length === 0 && typeof nodes.get !== 'function') return ""; } catch(e) { return ""; }
-    const contextData = nodes.get({ filter: function (item) { return item.group === 'knowledge'; } });
-    if (contextData.length === 0) return "";
-    return contextData.slice(-15).reverse().map(item => `- 【${item.label}】: ${item.title || "概要なし"}`).join("\n");
+    if (!allDocs || allDocs.length === 0) return "";
+    return allDocs.slice(0, 15).map(d => `- 【${d.data.word}】: ${d.data.summary}`).join("\n");
 }
-
 function appendMessage(text, type) {
     const history = document.getElementById('chat-history');
     if (!history) return;
@@ -471,25 +511,18 @@ function appendMessage(text, type) {
     history.appendChild(div);
     history.scrollTop = history.scrollHeight;
 }
-
 window.logToConsole = function(text, type = "system") {
     const msgType = (type === 'ai' || type === 'error') ? 'system' : type;
     appendMessage(`>> ${text}`, msgType);
 }
-
 window.sendChat = async function() {
     const input = document.getElementById('chatInput');
     const text = input.value.trim();
     if (!text) return;
     appendMessage(text, 'user');
     input.value = '';
-
     const apiKey = (CONFIG.openai || "").trim();
-    if (!apiKey) {
-        appendMessage("Error: API Key is missing.", "system");
-        return;
-    }
-
+    if (!apiKey) { appendMessage("Error: API Key missing.", "system"); return; }
     const loadingId = 'loading-' + Date.now();
     const history = document.getElementById('chat-history');
     const loadingDiv = document.createElement('div');
@@ -498,26 +531,11 @@ window.sendChat = async function() {
     loadingDiv.innerHTML = '<i class="fas fa-ellipsis-h fa-fade"></i> Connecting dots...';
     history.appendChild(loadingDiv);
     history.scrollTop = history.scrollHeight;
-
     try {
         const context = await getRecentContext();
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-        const prompt = `
-        You are "Orbit Assistant", an expert IT consultant.
-        The user has recently researched the following topics (Most recent first):
-        === RECENT SEARCH HISTORY ===
-        ${context || "No search history available yet."}
-        =============================
-        [INSTRUCTION]:
-        Answer the user's question in Japanese based on the history above if applicable.
-        [USER QUESTION]:
-        ${text}
-        `;
-        const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-        });
+        const prompt = `You are "Orbit Assistant", an expert IT consultant. User history:\n${context}\nAnswer:\n${text}`;
+        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
         const json = await res.json();
         const aiResponse = json.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't process that.";
         document.getElementById(loadingId).remove();
@@ -528,7 +546,7 @@ window.sendChat = async function() {
     }
 }
 
-// --- Helpers ---
+// Settings
 window.toggleSettings = function() {
     const modal = document.getElementById('settings-modal');
     modal.style.display = modal.style.display === 'flex' ? 'none' : 'flex';
