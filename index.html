@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit - AI Knowledge Explorer</title>
+    <title>ORBIT - Knowledge Network</title>
     <link rel="icon" href="img/orbit-atom.png" type="image/png">
     <link rel="apple-touch-icon" href="img/orbit-atom.png">
+
     <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Segoe+UI:wght@400;600&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,113 +18,137 @@
     <div id="network"></div>
 
     <div class="brand-logo">
-        <i class="fas fa-atom"></i>
-        <div class="brand-text">ORBIT<span>.ai</span></div>
+        <i class="fas fa-project-diagram"></i>
+        <div class="brand-text">ORBIT<span>.network</span></div>
     </div>
 
     <section class="search-section">
         <div class="input-container">
             <i class="fas fa-search search-icon"></i>
-            <input type="text" id="wordInput" placeholder="知識をインストール...">
-            <button id="searchBtn">EXPLORE</button>
+            <input type="text" id="wordInput" placeholder="新しい知識をネットワークに追加...">
+            <button id="searchBtn">CONNECT</button>
         </div>
         <p id="statusMessage" class="status-msg"></p>
     </section>
 
-    <div class="memo-section">
-        <div class="memo-header">
-            <i class="fas fa-list-ul"></i> Exploration Queue
-        </div>
-        <div class="memo-input-area">
-            <input type="text" id="memoInput" placeholder="気になる単語をメモ...">
-            <button id="addMemoBtn"><i class="fas fa-plus"></i></button>
-        </div>
-        <div id="memoContainer" class="memo-list">
-        </div>
-    </div>
-
-    <div class="bookshelf-section">
-        <div class="bookshelf-header">
-            <i class="fas fa-book"></i> Knowledge Bookshelf
-        </div>
-        <div id="folderList" class="folder-list">
-            <div class="folder-item active">All Items</div>
-        </div>
-    </div>
-
-    <section id="cardContainer" class="card-grid">
-    </section>
-
-<div id="settings-modal">
-        <div class="modal-content">
-            <h3><i class="fas fa-sliders-h"></i> System Configuration</h3>
-            <label>Firebase Config (JSON)</label>
-            <textarea id="firebase-config" rows="5" placeholder='{"apiKey": "...", ...}'></textarea>
-
-            <button class="action-btn" style="width:100%; margin-bottom: 10px;" onclick="saveSettings()">Save & Engage</button>
-            <button class="action-btn" style="width:100%; background:transparent; border:1px solid #555; color:#aaa;" onclick="toggleSettings()">Cancel</button>
-            
-            <div style="margin-top: 20px; border-top: 1px solid #333; padding-top: 15px;">
-                <h4 style="color:#ff6b6b; margin: 0 0 10px 0; font-size:0.9rem;">Danger Zone</h4>
-                <button class="action-btn danger" onclick="resetAllData()">
-                    <i class="fas fa-bomb"></i> Reset All Knowledge
-                </button>
+    <div class="sidebar">
+        <div class="user-profile-widget">
+            <div class="avatar"><i class="fas fa-brain"></i></div>
+            <div class="user-info">
+                <div class="user-name">My Knowledge Base</div>
+                <div class="user-stat"><span id="total-nodes">0</span> Connections</div>
             </div>
         </div>
-    </div>
 
-    <section id="cardContainer" class="card-grid">
-    </section>
+        <div class="tab-menu">
+            <button class="tab-btn active" onclick="switchTab('feed')"><i class="fas fa-stream"></i> Feed</button>
+            <button class="tab-btn" onclick="switchTab('folders')"><i class="fas fa-folder"></i> Folders</button>
+            <button class="tab-btn" onclick="switchTab('queue')"><i class="fas fa-list-ul"></i> Queue</button>
+        </div>
 
-    <div class="info-panel" id="info-panel">
-        <h2 id="panel-title">Node Title</h2>
-        <div id="panel-tags"></div>
-        <p id="panel-desc">Loading data stream...</p>
-        <div class="controls">
-            <button class="action-btn" onclick="closePanel()">Close Link</button>
+        <div id="feedTab" class="tab-content active">
+            <div id="cardContainer" class="feed-list">
+                </div>
+        </div>
+
+        <div id="foldersTab" class="tab-content">
+            <div id="folderList" class="folder-list">
+                </div>
+        </div>
+
+        <div id="queueTab" class="tab-content">
+            <div class="memo-input-area">
+                <input type="text" id="memoInput" placeholder="Quick save...">
+                <button id="addMemoBtn"><i class="fas fa-plus"></i></button>
+            </div>
+            <div id="memoContainer" class="memo-list">
+                </div>
         </div>
     </div>
 
     <div class="agent-console">
         <div class="console-header">
-            <span><i class="fas fa-robot"></i> ORBIT ASSISTANT</span>
-            <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog"></i> Config</div>
+            <span><i class="fas fa-robot"></i> AI CONSULTANT</span>
+            <div style="cursor: pointer;" onclick="toggleSettings()"><i class="fas fa-cog"></i></div>
         </div>
         <div class="console-body" id="chat-history">
-            <div class="chat-msg system">>> ORBIT System Online.</div>
-            <div class="chat-msg ai">こんにちは。業界知識について何でも聞いてください。</div>
+            <div class="chat-msg system">>> Network Online.</div>
         </div>
         <div class="console-input-area">
-            <input type="text" id="chatInput" placeholder="AIに質問... (例: AWSとAzureの違いは？)">
+            <input type="text" id="chatInput" placeholder="Ask details...">
             <button onclick="sendChat()"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+
+    <div id="profile-modal">
+        <div class="profile-card-large">
+            <div class="profile-header-bg"></div>
+            <span class="close-modal" onclick="closeProfileModal()">&times;</span>
+            
+            <div class="profile-main-info">
+                <div class="profile-avatar"><i class="fas fa-cube"></i></div>
+                <div class="profile-names">
+                    <h1 id="pm-title">Node Title</h1>
+                    <span id="pm-category" class="pm-badge">Category</span>
+                </div>
+                <div class="profile-actions">
+                    <button class="pm-btn primary" onclick="investigateCurrentNode()">
+                        <i class="fas fa-search-plus"></i> 深掘り調査
+                    </button>
+                    <button class="pm-btn danger" onclick="deleteCurrentNode()">
+                        <i class="fas fa-trash"></i> 削除
+                    </button>
+                </div>
+            </div>
+
+            <div class="profile-body">
+                <div class="pm-section">
+                    <h3><i class="fas fa-info-circle"></i> About</h3>
+                    <p id="pm-summary">Loading...</p>
+                    <div id="pm-analogy" class="analogy-box"></div>
+                </div>
+
+                <div class="pm-section">
+                    <h3><i class="fas fa-project-diagram"></i> Connections</h3>
+                    <div id="pm-connections" class="connection-tags"></div>
+                </div>
+
+                <div class="pm-section">
+                    <h3><i class="fas fa-history"></i> Detailed Analysis</h3>
+                    <div id="pm-details" class="detail-text">
+                        <button class="pm-btn secondary" onclick="generateDeepAnalysis()">
+                            <i class="fas fa-magic"></i> AI詳細レポートを作成
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
     <div id="settings-modal">
         <div class="modal-content">
-            <h3><i class="fas fa-sliders-h"></i> System Configuration</h3>
-            <p style="font-size: 0.8rem; color: #aaa;">Keys are stored locally in your browser.</p>
+            <h3>Configuration</h3>
+            <p style="font-size: 0.8rem; color: #aaa;">API Keys & Database</p>
+            
             <label>AI API Key (Gemini)</label>
-            <input type="password" id="openai-key" placeholder="AIza... (Gemini API Key)" onchange="this.value = this.value.trim()">
+            <input type="password" id="openai-key" placeholder="AIza..." onchange="this.value = this.value.trim()">
+            
             <label>Google Search API Key</label>
-            <input type="password" id="google-key" placeholder="AIza... (Search API Key)" onchange="this.value = this.value.trim()">
-            <label>Google Search Engine ID (CX)</label>
-            <input type="text" id="google-cx" placeholder="012345:abcdefg..." onchange="this.value = this.value.trim()">
+            <input type="password" id="google-key" onchange="this.value = this.value.trim()">
+            
+            <label>Search Engine ID (CX)</label>
+            <input type="text" id="google-cx" onchange="this.value = this.value.trim()">
+            
             <label>Firebase Config (JSON)</label>
-            <textarea id="firebase-config" rows="5" placeholder='{"apiKey": "...", ...}'></textarea>
-            <button class="action-btn" style="width:100%; margin-bottom: 10px;" onclick="saveSettings()">Save & Engage</button>
-            <button class="action-btn" style="width:100%; background:transparent; border:1px solid #555; color:#aaa;" onclick="toggleSettings()">Cancel</button>
-        </div>
-    </div>
+            <textarea id="firebase-config" rows="5"></textarea>
 
-    <div id="detail-modal">
-        <div class="detail-content">
-            <div class="detail-header">
-                <h2 id="detail-title">Detailed Analysis</h2>
-                <span class="close-modal" onclick="closeDetailModal()">&times;</span>
-            </div>
-            <div id="detail-body" class="detail-body">
-                Loading deep analysis...
+            <button class="action-btn" style="margin-bottom: 10px;" onclick="saveSettings()">Save Configuration</button>
+            <button class="action-btn" onclick="toggleSettings()" style="background:transparent; border:1px solid #555;">Cancel</button>
+            
+            <div style="margin-top:20px; border-top:1px solid #333; padding-top:15px;">
+                <button class="action-btn danger" onclick="resetAllData()">
+                    <i class="fas fa-bomb"></i> RESET ALL DATA
+                </button>
             </div>
         </div>
     </div>
